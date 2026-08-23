@@ -103,7 +103,8 @@ export default function UserManagement() {
     setLoading(false);
   }, [userId]);
 
-  useEffect(() => {
+        useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 

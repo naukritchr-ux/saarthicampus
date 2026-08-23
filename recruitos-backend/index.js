@@ -21,10 +21,13 @@ const { createGDRoom, createMeetingToken } = require("./dailyService");
 const jdRoutes = require("./jdRoutes");
 const { moveApplicationStage } = require("./pipelineSync");
 const { getRequestProfile } = require("./authHelpers");
-const multer = require('multer');
-const XLSX = require('xlsx');
-const pdfParse = require('pdf-parse');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const multer = require("multer");
+const XLSX = require("xlsx");
+const pdfParse = require("pdf-parse");
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 const app = express();
 app.use(cors());
@@ -553,12 +556,10 @@ app.post("/api/gd/manual", async (req, res) => {
     } = req.body;
 
     if (!candidate_name || confidence == null || communication == null) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Candidate name and at least confidence/communication scores are required",
-        });
+      return res.status(400).json({
+        error:
+          "Candidate name and at least confidence/communication scores are required",
+      });
     }
 
     const scores = [
@@ -1236,42 +1237,43 @@ Respond ONLY in this exact JSON format:
     res.status(500).json({ error: err.message });
   }
 });
-app.get('/api/candidate/:id/passport', async (req, res) => {
+app.get("/api/candidate/:id/passport", async (req, res) => {
   try {
     const { id } = req.params;
 
     const { data: candidate, error: candErr } = await supabase
-      .from('candidates')
-      .select('*, colleges(name)')
-      .eq('id', id)
+      .from("candidates")
+      .select("*, colleges(name)")
+      .eq("id", id)
       .single();
-    if (candErr || !candidate) return res.status(404).json({ error: 'Candidate not found' });
+    if (candErr || !candidate)
+      return res.status(404).json({ error: "Candidate not found" });
 
     const { data: applications } = await supabase
-      .from('applications')
-      .select('*, job_profiles(title, company)')
-      .eq('candidate_id', id)
-      .order('created_at', { ascending: false });
+      .from("applications")
+      .select("*, job_profiles(title, company)")
+      .eq("candidate_id", id)
+      .order("created_at", { ascending: false });
 
     const { data: aptitudeResults } = await supabase
-      .from('aptitude_results')
-      .select('*')
-      .eq('candidate_id', id)
-      .order('created_at', { ascending: false })
+      .from("aptitude_results")
+      .select("*")
+      .eq("candidate_id", id)
+      .order("created_at", { ascending: false })
       .limit(1);
 
     const { data: gdResults } = await supabase
-      .from('gd_participants')
-      .select('*')
-      .eq('candidate_id', id)
-      .order('joined_at', { ascending: false })
+      .from("gd_participants")
+      .select("*")
+      .eq("candidate_id", id)
+      .order("joined_at", { ascending: false })
       .limit(1);
 
     const { data: interviews } = await supabase
-      .from('interviews')
-      .select('*')
-      .eq('candidate_id', id)
-      .order('created_at', { ascending: false })
+      .from("interviews")
+      .select("*")
+      .eq("candidate_id", id)
+      .order("created_at", { ascending: false })
       .limit(1);
 
     res.json({
@@ -1282,34 +1284,34 @@ app.get('/api/candidate/:id/passport', async (req, res) => {
       interview: interviews?.[0] || null,
     });
   } catch (err) {
-    console.error('Passport error:', err);
+    console.error("Passport error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ---- AI EXCEL/PDF IMPORT — CAMPUS DATABASE ----
-app.post('/api/import/campus', upload.single('file'), async (req, res) => {
+app.post("/api/import/campus", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    let rawText = '';
+    let rawText = "";
 
-    const ext = req.file.originalname.split('.').pop().toLowerCase();
+    const ext = req.file.originalname.split(".").pop().toLowerCase();
 
-    if (ext === 'pdf') {
+    if (ext === "pdf") {
       const pdfData = await pdfParse(req.file.buffer);
       rawText = pdfData.text;
     } else {
       // Excel or CSV
-      const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
-      const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
       rawText = JSON.stringify(json, null, 2);
     }
 
     // Send to Groq AI for formatting
-    const Groq = require('groq-sdk');
+    const Groq = require("groq-sdk");
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
     const prompt = `
@@ -1344,34 +1346,34 @@ Respond ONLY with a valid JSON array, no other text:
 ]`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      messages: [{ role: 'user', content: prompt }],
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
       max_tokens: 4000,
     });
 
     const raw = completion.choices[0].message.content;
-    const clean = raw.replace(/```json|```/g, '').trim();
+    const clean = raw.replace(/```json|```/g, "").trim();
     const colleges = JSON.parse(clean);
 
     res.json({ success: true, preview: colleges, count: colleges.length });
   } catch (err) {
-    console.error('Campus import error:', err);
+    console.error("Campus import error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ---- SAVE IMPORTED CAMPUS DATA ----
-app.post('/api/import/campus/save', async (req, res) => {
+app.post("/api/import/campus/save", async (req, res) => {
   try {
     const { colleges } = req.body;
     if (!colleges || colleges.length === 0) {
-      return res.status(400).json({ error: 'No data to save' });
+      return res.status(400).json({ error: "No data to save" });
     }
 
     const { data, error } = await supabase
-      .from('colleges')
-      .upsert(colleges, { onConflict: 'name' })
+      .from("colleges")
+      .upsert(colleges, { onConflict: "name" })
       .select();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -1383,25 +1385,25 @@ app.post('/api/import/campus/save', async (req, res) => {
 });
 
 // ---- AI EXCEL/PDF IMPORT — CORPORATE DATABASE ----
-app.post('/api/import/corporate', upload.single('file'), async (req, res) => {
+app.post("/api/import/corporate", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    let rawText = '';
-    const ext = req.file.originalname.split('.').pop().toLowerCase();
+    let rawText = "";
+    const ext = req.file.originalname.split(".").pop().toLowerCase();
 
-    if (ext === 'pdf') {
+    if (ext === "pdf") {
       const pdfData = await pdfParse(req.file.buffer);
       rawText = pdfData.text;
     } else {
-      const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
-      const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
       rawText = JSON.stringify(json, null, 2);
     }
 
-    const Groq = require('groq-sdk');
+    const Groq = require("groq-sdk");
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
     const prompt = `
@@ -1433,34 +1435,34 @@ Respond ONLY with a valid JSON array, no other text:
 ]`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      messages: [{ role: 'user', content: prompt }],
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
       max_tokens: 4000,
     });
 
     const raw = completion.choices[0].message.content;
-    const clean = raw.replace(/```json|```/g, '').trim();
+    const clean = raw.replace(/```json|```/g, "").trim();
     const companies = JSON.parse(clean);
 
     res.json({ success: true, preview: companies, count: companies.length });
   } catch (err) {
-    console.error('Corporate import error:', err);
+    console.error("Corporate import error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ---- SAVE IMPORTED CORPORATE DATA ----
-app.post('/api/import/corporate/save', async (req, res) => {
+app.post("/api/import/corporate/save", async (req, res) => {
   try {
     const { companies } = req.body;
     if (!companies || companies.length === 0) {
-      return res.status(400).json({ error: 'No data to save' });
+      return res.status(400).json({ error: "No data to save" });
     }
 
     const { data, error } = await supabase
-      .from('companies')
-      .upsert(companies, { onConflict: 'name' })
+      .from("companies")
+      .upsert(companies, { onConflict: "name" })
       .select();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -1469,4 +1471,100 @@ app.post('/api/import/corporate/save', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+// Corporate: candidates who applied to this company's jobs
+app.get("/api/corporate/candidates", async (req, res) => {
+  const profile = await getRequestProfile(supabase, req);
+  if (!profile || profile.role !== "corporate") {
+    return res.status(403).json({ error: "Corporate access required" });
+  }
+  if (!profile.company_id) return res.json([]);
+
+  const { data: jobs } = await supabase
+    .from("job_profiles")
+    .select("id, title")
+    .eq("company_id", profile.company_id);
+
+  const jobIds = (jobs || []).map((j) => j.id);
+  if (jobIds.length === 0) return res.json([]);
+
+  const { data: apps, error } = await supabase
+    .from("applications")
+    .select(
+      `
+      id, stage, resume_score, created_at, job_id,
+      candidates ( id, name, email, phone, colleges ( name ) ),
+      job_profiles ( id, title )
+    `,
+    )
+    .in("job_id", jobIds);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const flat = apps.map((a) => ({
+    id: a.id,
+    name: a.candidates?.name || "Unknown",
+    role: a.job_profiles?.title || "Unknown",
+    match: a.resume_score ?? 0,
+    resumeScore: a.resume_score ?? 0,
+    experience: "—",
+    experienceYears: null,
+    skills: "",
+    location: a.candidates?.colleges?.name || "—",
+    stage: a.stage || "Applied",
+    source: "Application",
+    email: a.candidates?.email || "",
+    phone: a.candidates?.phone || "",
+  }));
+
+  res.json(flat);
+});
+
+// Corporate: KPI summary
+app.get("/api/corporate/kpis", async (req, res) => {
+  const profile = await getRequestProfile(supabase, req);
+  if (!profile || profile.role !== "corporate") {
+    return res.status(403).json({ error: "Corporate access required" });
+  }
+  if (!profile.company_id) {
+    return res.json({
+      availableCandidates: 0,
+      matchingCandidates: 0,
+      jobProfiles: 0,
+      locations: 0,
+    });
+  }
+
+  const { data: jobs } = await supabase
+    .from("job_profiles")
+    .select("id")
+    .eq("company_id", profile.company_id);
+  const jobIds = (jobs || []).map((j) => j.id);
+
+  let availableCandidates = 0;
+  let matchingCandidates = 0;
+  const locationSet = new Set();
+
+  if (jobIds.length > 0) {
+    const { data: apps } = await supabase
+      .from("applications")
+      .select("resume_score, candidates(colleges(name))")
+      .in("job_id", jobIds);
+
+    availableCandidates = apps?.length || 0;
+    matchingCandidates = (apps || []).filter(
+      (a) => (a.resume_score ?? 0) >= 70,
+    ).length;
+    (apps || []).forEach((a) => {
+      const loc = a.candidates?.colleges?.name;
+      if (loc) locationSet.add(loc);
+    });
+  }
+
+  res.json({
+    availableCandidates,
+    matchingCandidates,
+    jobProfiles: jobIds.length,
+    locations: locationSet.size,
+  });
 });

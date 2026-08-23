@@ -669,3 +669,19 @@ export async function getCandidates() {
   if (error) throw error;
   return data;
 }
+
+export async function getCorporateCandidates() {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/candidates`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load candidates');
+  return data;
+}
+
+export async function getCorporateKpis() {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/kpis`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load KPIs');
+  return data;
+}

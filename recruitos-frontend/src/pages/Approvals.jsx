@@ -70,7 +70,14 @@ export default function Approvals() {
   }
 
   useEffect(() => {
-    loadShortlisted();
+    let ignore = false;
+
+    async function init() {
+      await loadShortlisted(ignore);
+    }
+
+    init();
+    return () => { ignore = true; };
   }, []);
 
   async function handleApprove(applicationId) {

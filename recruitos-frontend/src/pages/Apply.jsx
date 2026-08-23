@@ -33,7 +33,6 @@ export default function Apply() {
   const [collegeMode, setCollegeMode] = useState('search');
   const [file, setFile] = useState(null);
   const [photo, setPhoto] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [applyingJobId, setApplyingJobId] = useState(null);
@@ -48,16 +47,6 @@ export default function Apply() {
     getColleges().then(setColleges).catch(() => {});
     getJobs().then(setJobs).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (!photo) {
-      setPhotoPreview(null);
-      return;
-    }
-    const url = URL.createObjectURL(photo);
-    setPhotoPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo]);
 
   const locationOptions = useMemo(
     () => ['all', ...new Set(jobs.map((j) => j.location).filter(Boolean))],
@@ -172,6 +161,11 @@ export default function Apply() {
       setApplyingJobId(null);
     }
   }
+
+  const getPhotoUrl = () => {
+    if (!photo) return null;
+    return URL.createObjectURL(photo);
+  };
 
   const pageStyle = {
     minHeight: '100vh',
@@ -354,12 +348,12 @@ export default function Apply() {
             <div className="field">
               <label>Profile Photo</label>
               <input id="photo-input" type="file" accept="image/*" onChange={handlePhotoChange} />
-              {photoPreview && (
+              {photo && (
                 <div style={{ position: 'relative', display: 'inline-block', marginTop: 8 }}>
                   <img
-                    src={photoPreview}
+                    src={getPhotoUrl()}
                     alt="Preview"
-                    onClick={() => window.open(photoPreview, '_blank')}
+                    onClick={() => window.open(getPhotoUrl(), '_blank')}
                     style={{
                       width: 72,
                       height: 72,

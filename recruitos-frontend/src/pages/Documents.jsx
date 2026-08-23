@@ -57,13 +57,15 @@ export default function Documents() {
 
     const { data, error } = await supabase
       .from("applications")
-      .select(`
+      .select(
+        `
         id, stage,
         id_proof_url, marksheet_url, offer_letter_url,
         id_proof_status, marksheet_status, offer_letter_status,
         candidates ( id, name, email, resume_url ),
         job_profiles ( title )
-      `)
+      `,
+      )
       .in("job_id", jobIds)
       .eq("stage", "Selected")
       .order("created_at", { ascending: false });
@@ -78,7 +80,16 @@ export default function Documents() {
   }
 
   useEffect(() => {
-    loadApprovedCandidates();
+    let ignore = false;
+
+    async function init() {
+      await loadApprovedCandidates(ignore);
+    }
+
+    init();
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   async function handleFileUpload(appId, docKey, file) {
@@ -86,7 +97,9 @@ export default function Documents() {
     setUploadingKey(`${appId}-${docKey}`);
 
     try {
-      const fileName = `${appId}_${docKey}_${Date.now()}_${file.name}`;
+      // eslint-disable-next-line react-hooks/purity
+      const timestamp = Date.now();
+      const fileName = `${appId}_${docKey}_${timestamp}_${file.name}`;
       const { error: uploadErr } = await supabase.storage
         .from("candidate-documents")
         .upload(fileName, file);
@@ -141,7 +154,8 @@ export default function Documents() {
       a.candidates?.name?.toLowerCase().includes(q) ||
       a.job_profiles?.title?.toLowerCase().includes(q);
 
-    const matchStatus = statusFilter === "All" || overallStatus(a) === statusFilter;
+    const matchStatus =
+      statusFilter === "All" || overallStatus(a) === statusFilter;
 
     return matchSearch && matchStatus;
   });
@@ -152,7 +166,9 @@ export default function Documents() {
         <div>
           <h1>Documents</h1>
           <p>
-            {loading ? "Loading…" : `${applications.length} approved candidates`}
+            {loading
+              ? "Loading…"
+              : `${applications.length} approved candidates`}
             {" · "}
             required documents from selected candidates
           </p>
@@ -188,7 +204,10 @@ export default function Documents() {
 
         {/* TABLE */}
         <div style={{ overflowX: "auto", marginTop: 12 }}>
-          <table className="data-table" style={{ width: "100%", minWidth: 1100 }}>
+          <table
+            className="data-table"
+            style={{ width: "100%", minWidth: 1100 }}
+          >
             <thead>
               <tr>
                 <th>Candidate</th>
@@ -212,14 +231,21 @@ export default function Documents() {
                   <tr key={app.id}>
                     <td>
                       <strong>{app.candidates?.name}</strong>
-                      <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                      <div
+                        style={{ fontSize: 11.5, color: "var(--text-muted)" }}
+                      >
                         {app.candidates?.email}
                       </div>
                     </td>
                     <td>{app.job_profiles?.title || "—"}</td>
                     <td>
                       {app.candidates?.resume_url ? (
-                        <a href={app.candidates.resume_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary)" }}>
+                        <a
+                          href={app.candidates.resume_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "var(--primary)" }}
+                        >
                           View
                         </a>
                       ) : (
@@ -230,39 +256,78 @@ export default function Documents() {
                     {DOC_FIELDS.map((doc) => {
                       const url = app[`${doc.key}_url`];
                       const status = app[`${doc.key}_status`] || "Pending";
-                      const isUploading = uploadingKey === `${app.id}-${doc.key}`;
+                      const isUploading =
+                        uploadingKey === `${app.id}-${doc.key}`;
 
                       return (
                         <td key={doc.key}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 130 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
+                              minWidth: 130,
+                            }}
+                          >
                             {url ? (
-                              <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: "var(--primary)" }}>
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  fontSize: 11.5,
+                                  color: "var(--primary)",
+                                }}
+                              >
                                 View File
                               </a>
                             ) : (
-                              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  color: "var(--text-muted)",
+                                }}
+                              >
                                 {isUploading ? "Uploading…" : "Not uploaded"}
                               </span>
                             )}
 
                             <input
                               type="file"
-                              onChange={(e) => handleFileUpload(app.id, doc.key, e.target.files[0])}
+                              onChange={(e) =>
+                                handleFileUpload(
+                                  app.id,
+                                  doc.key,
+                                  e.target.files[0],
+                                )
+                              }
                               style={{ fontSize: 10.5 }}
                             />
 
                             <select
                               value={status}
-                              onChange={(e) => handleStatusChange(app.id, doc.key, e.target.value)}
+                              onChange={(e) =>
+                                handleStatusChange(
+                                  app.id,
+                                  doc.key,
+                                  e.target.value,
+                                )
+                              }
                               style={{
-                                fontSize: 10.5, fontWeight: 600, border: "none", borderRadius: 6,
-                                padding: "2px 6px", cursor: "pointer",
+                                fontSize: 10.5,
+                                fontWeight: 600,
+                                border: "none",
+                                borderRadius: 6,
+                                padding: "2px 6px",
+                                cursor: "pointer",
                                 background: statusColors[status]?.bg,
                                 color: statusColors[status]?.text,
                               }}
                             >
                               {STATUS_OPTIONS.map((s) => (
-                                <option key={s} value={s}>{s}</option>
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
                               ))}
                             </select>
                           </div>
@@ -288,7 +353,14 @@ export default function Documents() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: "center", color: "var(--slate-light)", padding: 24 }}>
+                  <td
+                    colSpan={7}
+                    style={{
+                      textAlign: "center",
+                      color: "var(--slate-light)",
+                      padding: 24,
+                    }}
+                  >
                     No approved candidates yet
                   </td>
                 </tr>

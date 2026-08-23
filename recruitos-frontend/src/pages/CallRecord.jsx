@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Search, Filter, X } from "lucide-react";
 import { getCallRecords, addCallRecord, updateCallRecord, deleteCallRecord } from "../lib/api";
 
@@ -42,21 +42,36 @@ export default function CallRecord() {
     return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
   }
 
-  async function loadData() {
-    try {
-      setLoading(true);
-      const data = await getCallRecords();
-      setCallRecords(data || []);
-    } catch (err) {
-      console.error("Failed to load call records:", err);
-      setError(err.message || "Failed to load call records.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    useEffect(() => {
+    let isMounted = true;
 
-  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const data = await getCallRecords();
+        
+        if (isMounted) {
+          setCallRecords(data || []);
+          setError("");
+        }
+      } catch (err) {
+        console.error("Failed to load call records:", err);
+        
+        if (isMounted) {
+          setError(err.message || "Failed to load call records.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
     loadData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   function validateForm(values) {
@@ -215,7 +230,7 @@ export default function CallRecord() {
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
-  async function handleSubmit(e) {
+    async function handleSubmit(e) {
     e.preventDefault();
 
     const validationErrors = validateForm(form);
@@ -245,7 +260,15 @@ export default function CallRecord() {
         await addCallRecord(payload);
       }
 
-      await loadData();
+      // Reload records after saving
+      try {
+        const data = await getCallRecords();
+        setCallRecords(data || []);
+        setError("");
+      } catch (err) {
+        console.error("Failed to reload records:", err);
+      }
+
       setShowModal(false);
       setEditingId(null);
     } catch (err) {
@@ -255,12 +278,13 @@ export default function CallRecord() {
       setSaving(false);
     }
   }
-
-  function badgeClass(status) {
-    if (status === "Completed") return "badge green";
-    if (status === "Follow Up") return "badge gold";
-    if (status === "Cancelled") return "badge red";
-    return "badge gray";
+  function getStatusColor(status) {
+    const colors = {
+      "Completed": { bg: "#16a34a", text: "#fff" },
+      "Follow Up": { bg: "#d97706", text: "#fff" },
+      "Cancelled": { bg: "#dc2626", text: "#fff" }
+    };
+    return colors[status] || { bg: "#e5e7eb", text: "#111" };
   }
 
   if (loading) {
@@ -387,12 +411,15 @@ export default function CallRecord() {
                         value={call.status}
                         onChange={(e) => handleStatusChange(call.id, e.target.value)}
                         style={{
-                          ...statusSelectStyle(call.status),
+                          ...getStatusColor(call.status),
                           cursor: "pointer",
                           fontWeight: 700,
                           fontFamily: "var(--font-body)",
                           fontSize: "12px",
-                          outline: "none"
+                          outline: "none",
+                          border: "none",
+                          borderRadius: "20px",
+                          padding: "5px 10px"
                         }}
                       >
                         <option value="Completed" style={optionStyle}>Completed</option>
@@ -602,22 +629,6 @@ const optionStyle = {
   background: "#fff",
   fontWeight: 500
 };
-
-function statusSelectStyle(status) {
-  const colors = {
-    "Completed": { bg: "#16a34a", text: "#fff" },
-    "Follow Up": { bg: "#d97706", text: "#fff" },
-    "Cancelled": { bg: "#dc2626", text: "#fff" }
-  };
-  const c = colors[status] || { bg: "#e5e7eb", text: "#111" };
-  return {
-    background: c.bg,
-    color: c.text,
-    border: "none",
-    borderRadius: "20px",
-    padding: "5px 10px"
-  };
-}
 
 const errorStyle = {
   color: "#e33",
