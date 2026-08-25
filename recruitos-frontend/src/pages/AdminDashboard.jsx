@@ -9,6 +9,14 @@ const STATUS_OPTIONS = [
   "Shortlisted",
 ];
 
+// Platform Adoption targets — from the 3-month promotion/adoption plan.
+// These are TARGETS to compare against, not values to hardcode as achieved.
+const ADOPTION_TARGETS = {
+  institutes: 300,
+  corporates: 150,
+  candidates: 15000,
+};
+
 function AdminDashboard() {
   const [profileFilter, setProfileFilter] =
     useState("All Profiles");
@@ -237,6 +245,66 @@ function AdminDashboard() {
       )
     : 1;
 
+  // ---- Platform Adoption (Institutes / Corporates / Candidates) ----
+  // Uses the same candidates/requirements data already loaded above.
+  // "Institutes" = distinct colleges seen in candidate records.
+  // "Corporates" = distinct companies seen in requirement records.
+  const totalInstitutes = colleges.length;
+
+  const activeInstitutes = useMemo(() => {
+    return colleges.filter((college) =>
+      candidates.some(
+        (candidate) =>
+          candidate.college === college &&
+          candidate.status &&
+          candidate.status !== "Inactive",
+      ),
+    ).length;
+  }, [colleges, candidates]);
+
+  const totalCorporates = companies.length;
+
+  const verifiedCorporates = useMemo(() => {
+    return companies.filter((company) =>
+      requirements.some(
+        (requirement) =>
+          requirement.company === company &&
+          (requirement.verification_status === "Verified" ||
+            requirement.verification_status === "Active"),
+      ),
+    ).length;
+  }, [companies, requirements]);
+
+  const activeCorporates = useMemo(() => {
+    return companies.filter((company) =>
+      requirements.some(
+        (requirement) =>
+          requirement.company === company &&
+          requirement.status === "Active",
+      ),
+    ).length;
+  }, [companies, requirements]);
+
+  const totalCandidatesOverall = candidates.length;
+
+  const profileCompletedCandidates = useMemo(() => {
+    return candidates.filter(
+      (candidate) => candidate.profile_completion >= 100,
+    ).length;
+  }, [candidates]);
+
+  const inactiveInstitutesCount = totalInstitutes - activeInstitutes;
+
+  const unverifiedCorporatesCount = totalCorporates - verifiedCorporates;
+
+  const incompleteProfilesCount =
+    totalCandidatesOverall - profileCompletedCandidates;
+
+  function getAdoptionPercent(actual, target) {
+    if (!target) return 0;
+    return Math.min(100, Math.round((actual / target) * 100));
+  }
+
   function resetFilters() {
     setProfileFilter("All Profiles");
     setCollegeFilter("All Colleges");
@@ -395,6 +463,61 @@ function AdminDashboard() {
       </section>
 
       <main className="dashboard-grid">
+        <section className="card full-width adoption-card">
+          <CardHeading
+            title="Platform Adoption"
+            subtitle="Registered vs. 3-month activation targets across the three-sided platform"
+          />
+
+          <div className="adoption-grid">
+            <AdoptionCard
+              icon="🏫"
+              label="Institutes"
+              actual={totalInstitutes}
+              target={ADOPTION_TARGETS.institutes}
+              percent={getAdoptionPercent(
+                totalInstitutes,
+                ADOPTION_TARGETS.institutes,
+              )}
+              breakdown={[
+                { label: "Active", value: activeInstitutes },
+              ]}
+            />
+
+            <AdoptionCard
+              icon="🏢"
+              label="Corporates"
+              actual={totalCorporates}
+              target={ADOPTION_TARGETS.corporates}
+              percent={getAdoptionPercent(
+                totalCorporates,
+                ADOPTION_TARGETS.corporates,
+              )}
+              breakdown={[
+                { label: "Verified", value: verifiedCorporates },
+                { label: "Active", value: activeCorporates },
+              ]}
+            />
+
+            <AdoptionCard
+              icon="🎓"
+              label="Candidates"
+              actual={totalCandidatesOverall}
+              target={ADOPTION_TARGETS.candidates}
+              percent={getAdoptionPercent(
+                totalCandidatesOverall,
+                ADOPTION_TARGETS.candidates,
+              )}
+              breakdown={[
+                {
+                  label: "Profile Completed",
+                  value: profileCompletedCandidates,
+                },
+              ]}
+            />
+          </div>
+        </section>
+
         <section className="card monthly-card">
           <CardHeading
             title="Monthly Recruitment Activity"
@@ -696,10 +819,28 @@ function AdminDashboard() {
               description="Candidates requiring next-stage movement"
             />
 
-            <ActionItem
+                        <ActionItem
               value={activeRequirements}
               title="Active Corporate Requirements"
               description="Currently open requirements"
+            />
+
+            <ActionItem
+              value={inactiveInstitutesCount}
+              title="Inactive Institutes"
+              description="Institutes with no recent activity"
+            />
+
+            <ActionItem
+              value={unverifiedCorporatesCount}
+              title="Unverified Corporates"
+              description="Corporate accounts awaiting verification"
+            />
+
+            <ActionItem
+              value={incompleteProfilesCount}
+              title="Incomplete Candidate Profiles"
+              description="Candidates yet to complete their profile"
             />
           </div>
         </section>
@@ -753,6 +894,48 @@ function KpiCard({ icon, label, value, helper }) {
         <h2>{value}</h2>
         <small>{helper}</small>
       </div>
+    </div>
+  );
+}
+
+function AdoptionCard({
+  icon,
+  label,
+  actual,
+  target,
+  percent,
+  breakdown,
+}) {
+  return (
+    <div className="adoption-item">
+      <div className="adoption-item-top">
+        <div className="adoption-symbol">{icon}</div>
+        <span>{label}</span>
+      </div>
+
+      <div className="adoption-value">
+        <strong>{actual.toLocaleString()}</strong>
+        <small> / {target.toLocaleString()}+</small>
+      </div>
+
+      <div className="adoption-progress">
+        <div
+          className="adoption-progress-fill"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+
+      <div className="adoption-percent">{percent}% of target</div>
+
+      {breakdown && breakdown.length > 0 && (
+        <div className="adoption-breakdown">
+          {breakdown.map((row) => (
+            <span key={row.label}>
+              {row.label}: <strong>{row.value}</strong>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

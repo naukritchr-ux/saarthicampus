@@ -6,6 +6,8 @@ import {
   getOffers,
   getJoiningStatus,
   getCallRecords,
+  getCandidates,
+  getJobs,
 } from "../lib/api";
 
 import {
@@ -39,6 +41,12 @@ const CHART_COLORS = [
   "#14B8A6",
   "#EF4444",
 ];
+
+const ANALYTICS_TARGETS = {
+  institutes: 300,
+  corporates: 150,
+  candidates: 15000,
+};
 
 /* ---------------------------------------------------------
    REPORT LIST
@@ -90,6 +98,21 @@ const REPORT_LIST = [
     t: "Call Records Report",
     d: "Completed calls, follow-ups by organization",
   },
+  {
+    key: "instituteAnalytics",
+    t: "Institute Analytics",
+    d: "Institutes, drives, students shared vs target",
+  },
+  {
+    key: "corporateAnalytics",
+    t: "Corporate Analytics",
+    d: "Corporates, jobs posted, hiring activity vs target",
+  },
+  {
+    key: "candidateAnalytics",
+    t: "Candidate Analytics",
+    d: "Candidates, profiles, applications vs target",
+  },
 ];
 
 /* ---------------------------------------------------------
@@ -135,6 +158,10 @@ export default function Reports() {
   const [offers, setOffers] = useState([]);
   const [joining, setJoining] = useState([]);
   const [calls, setCalls] = useState([]);
+  const [colleges, setColleges] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [candidates, setCandidates] = useState([]);
+  const [jobs, setJobs] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -150,13 +177,15 @@ export default function Reports() {
 
     async function init() {
       try {
-        const [a, , , off, joi, callData] = await Promise.all([
+        const [a, collegesData, companiesData, off, joi, callData, candidatesData, jobsData] = await Promise.all([
           getAllApplications(),
           getColleges(),
           getCompanies(),
           getOffers(),
           getJoiningStatus(),
           getCallRecords(),
+          getCandidates(),
+          getJobs(),
         ]);
 
         if (!ignore) {
@@ -164,6 +193,10 @@ export default function Reports() {
           setOffers(off || []);
           setJoining(joi || []);
           setCalls(callData || []);
+          setColleges(collegesData || []);
+          setCompanies(companiesData || []);
+          setCandidates(candidatesData || []);
+          setJobs(jobsData || []);
         }
       } catch (err) {
         if (!ignore) {
@@ -488,6 +521,50 @@ export default function Reports() {
 
     return Object.values(byOrg).sort((a, b) => b.total - a.total);
   }, [calls]);
+
+  /* -------------------------------------------------------
+     INSTITUTE ANALYTICS
+  ------------------------------------------------------- */
+
+  const instituteStats = useMemo(() => {
+    const total = colleges.length;
+    const active = colleges.filter((c) => c.status !== "Inactive").length;
+    const inactive = total - active;
+    const studentsShared = apps.filter((a) => a?.candidates?.college_id).length;
+
+    return { total, active, inactive, studentsShared };
+  }, [colleges, apps]);
+
+  /* -------------------------------------------------------
+     CORPORATE ANALYTICS
+  ------------------------------------------------------- */
+
+  const corporateStats = useMemo(() => {
+    const total = companies.length;
+    const verified = companies.filter(
+      (c) => c.hiring_status === "Verified" || c.hiring_status === "Active"
+    ).length;
+    const active = companies.filter((c) => c.hiring_status === "Active").length;
+    const jobsPosted = jobs.length;
+
+    return { total, verified, active, jobsPosted };
+  }, [companies, jobs]);
+
+  /* -------------------------------------------------------
+     CANDIDATE ANALYTICS
+  ------------------------------------------------------- */
+
+  const candidateStats = useMemo(() => {
+    const total = candidates.length;
+    const profileCompleted = candidates.filter(
+      (c) => c.resume_url && c.degree && c.branch && c.cgpa
+    ).length;
+    const applications = apps.length;
+    const selected = apps.filter((a) => a.stage === "Selected").length;
+    const joined = apps.filter((a) => a.stage === "Joined").length;
+
+    return { total, profileCompleted, applications, selected, joined };
+  }, [candidates, apps]);
 
   /* -------------------------------------------------------
      LOADING
@@ -1494,6 +1571,97 @@ export default function Reports() {
               </tbody>
             </table>
           )}
+                </div>
+      )}
+
+      {/* =================================================
+          INSTITUTE ANALYTICS
+      ================================================= */}
+
+      {active === "instituteAnalytics" && (
+        <div className="panel">
+          <div className="panel-title">Institute Analytics</div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginBottom: 20 }}>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Total Institutes</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{instituteStats.total} / {ANALYTICS_TARGETS.institutes}+</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Active Institutes</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{instituteStats.active}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Inactive Institutes</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{instituteStats.inactive}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Students Shared</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{instituteStats.studentsShared}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================
+          CORPORATE ANALYTICS
+      ================================================= */}
+
+      {active === "corporateAnalytics" && (
+        <div className="panel">
+          <div className="panel-title">Corporate Analytics</div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginBottom: 20 }}>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Total Corporates</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{corporateStats.total} / {ANALYTICS_TARGETS.corporates}+</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Verified Corporates</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{corporateStats.verified}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Active Corporates</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{corporateStats.active}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Jobs Posted</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{corporateStats.jobsPosted}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================
+          CANDIDATE ANALYTICS
+      ================================================= */}
+
+      {active === "candidateAnalytics" && (
+        <div className="panel">
+          <div className="panel-title">Candidate Analytics</div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12, marginBottom: 20 }}>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Total Candidates</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{candidateStats.total} / {ANALYTICS_TARGETS.candidates.toLocaleString()}+</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Profile Completed</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{candidateStats.profileCompleted}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Applications</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{candidateStats.applications}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Selected</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{candidateStats.selected}</div>
+            </div>
+            <div className="panel">
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Joined</div>
+              <div style={{ fontSize: 24, fontWeight: 700, marginTop: 5 }}>{candidateStats.joined}</div>
+            </div>
+          </div>
         </div>
       )}
     </div>

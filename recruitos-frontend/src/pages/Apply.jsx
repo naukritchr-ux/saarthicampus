@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { getJobs, getColleges, uploadResume, uploadPhoto, createCandidate, applyToJob, updateApplicationScore } from '../lib/api';
+import { getJobs, getColleges, uploadResume, uploadPhoto, createCandidate, applyToJob, updateApplicationScore, computeMatchScore } from '../lib/api';
 import { extractPdfText, scoreResume } from '../lib/resumeScoring';
 import CollegeAutocomplete from './CollegeAutocomplete';
 import { sanitizePhone } from '../lib/phone';
@@ -29,6 +29,7 @@ export default function Apply() {
     name: '', email: '', phone: '', college_id: '', college_other: '',
     degree: '', branch: '', cgpa: '', passing_year: '',
     active_backlogs: false, tenth_percentage: '', twelfth_percentage: '',
+    skills: '', linkedin_url: '', github_url: '',
   });
   const [collegeMode, setCollegeMode] = useState('search');
   const [file, setFile] = useState(null);
@@ -105,7 +106,10 @@ export default function Apply() {
       }
 
       const resume_url = await uploadResume(file);
-      const candidate = await createCandidate({ ...form, resume_url, photo_url });
+      const skillsArray = form.skills
+        ? form.skills.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+      const candidate = await createCandidate({ ...form, skills: skillsArray, resume_url, photo_url });
       setCandidateId(candidate.id);
 
       try {
@@ -390,6 +394,36 @@ export default function Apply() {
             </div>
 
             <div className="field">
+              <label>Skills</label>
+              <input
+                value={form.skills}
+                onChange={(e) => setForm({ ...form, skills: e.target.value })}
+                placeholder="e.g. React, Node.js, Python (comma-separated)"
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label>LinkedIn (optional)</label>
+                <input
+                  type="url"
+                  value={form.linkedin_url}
+                  onChange={(e) => setForm({ ...form, linkedin_url: e.target.value })}
+                  placeholder="https://linkedin.com/in/…"
+                />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label>GitHub (optional)</label>
+                <input
+                  type="url"
+                  value={form.github_url}
+                  onChange={(e) => setForm({ ...form, github_url: e.target.value })}
+                  placeholder="https://github.com/…"
+                />
+              </div>
+            </div>
+
+            <div className="field">
               <label>Resume (PDF) *</label>
               <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files[0])} required />
             </div>
@@ -458,8 +492,19 @@ export default function Apply() {
               <div key={j.id} style={{ border: '1px solid #EEE', borderRadius: 12, padding: '16px 18px', background: '#fff' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
                   <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: '#111', lineHeight: 1.3 }}>{j.title}</div>
-                    <div style={{ fontSize: 12, color: '#999', marginTop: 4, lineHeight: 1.6 }}>
+<div style={{ fontWeight: 700, fontSize: 15, color: '#111', lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 8 }}>
+  {j.title}
+  {(() => {
+    const match = computeMatchScore(form.skills, j.skills);
+    if (match === null) return null;
+    const color = match >= 70 ? '#16A34A' : match >= 40 ? '#B8894A' : '#DC2626';
+    return (
+      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: `${color}18`, color }}>
+        {match}% Match
+      </span>
+    );
+  })()}
+</div>                    <div style={{ fontSize: 12, color: '#999', marginTop: 4, lineHeight: 1.6 }}>
                       {j.company}{j.location ? ` · ${j.location}` : ''}{j.salary_range ? ` · ${j.salary_range}` : ''}
                     </div>
                     {scoring && <div style={{ fontSize: 11, color: '#B8894A', marginTop: 4 }}>Analyzing your resume…</div>}

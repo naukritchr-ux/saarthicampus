@@ -1568,3 +1568,157 @@ app.get("/api/corporate/kpis", async (req, res) => {
     locations: locationSet.size,
   });
 });
+
+
+// ==============================================================
+// CANDIDATE SEARCH (Corporate) — searches the FULL candidate pool,
+// not just applicants to this company's jobs.
+// Append this block to recruitos-backend/index.js
+// ==============================================================
+
+// Corporate: search the talent pool with filters
+app.get("/api/corporate/candidates/search", async (req, res) => {
+  const profile = await getRequestProfile(supabase, req);
+  if (!profile || profile.role !== "corporate") {
+    return res.status(403).json({ error: "Corporate access required" });
+  }
+
+  const {
+    name,
+    college,
+    degree,
+    branch,
+    skills,
+    location,
+    minCgpa,
+    minExperience,
+  } = req.query;
+
+  let query = supabase
+    .from("candidates")
+    .select(
+      `
+      id, name, email, phone, resume_url, photo_url,
+      degree, branch, cgpa, passing_year, skills, location,
+      experience_years, linkedin_url, github_url,
+      college_id, college_other, colleges ( name )
+      `,
+    )
+    .order("created_at", { ascending: false });
+
+  if (name) query = query.ilike("name", `%${name}%`);
+  if (degree) query = query.ilike("degree", `%${degree}%`);
+  if (branch) query = query.ilike("branch", `%${branch}%`);
+  if (skills) query = query.ilike("skills", `%${skills}%`);
+  if (location) {
+    query = query.or(
+      `location.ilike.%${location}%,college_other.ilike.%${location}%`,
+    );
+  }
+  if (minCgpa) query = query.gte("cgpa", Number(minCgpa));
+  if (minExperience) query = query.gte("experience_years", Number(minExperience));
+
+  const { data: candidates, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  let filtered = candidates || [];
+  if (college) {
+    const q = college.toLowerCase();
+    filtered = filtered.filter((c) =>
+      (c.colleges?.name || c.college_other || "").toLowerCase().includes(q),
+    );
+  }
+
+  // Attach match score + application stage if this candidate has applied
+  // to any of this company's jobs; also mark saved status.
+  let matchByCandidate = {};
+  let savedSet = new Set();
+
+  if (profile.company_id && filtered.length > 0) {
+    const { data: jobs } = await supabase
+      .from("job_profiles")
+      .select("id")
+      .eq("company_id", profile.company_id);
+    const jobIds = (jobs || []).map((j) => j.id);
+
+    if (jobIds.length > 0) {
+      const candidateIds = filtered.map((c) => c.id);
+      const { data: apps } = await supabase
+        .from("applications")
+        .select("candidate_id, resume_score, stage")
+        .in("job_id", jobIds)
+        .in("candidate_id", candidateIds);
+
+      (apps || []).forEach((a) => {
+        matchByCandidate[a.candidate_id] = {
+          match: a.resume_score ?? null,
+          stage: a.stage,
+        };
+      });
+    }
+
+    const { data: saved } = await supabase
+      .from("saved_candidates")
+      .select("candidate_id")
+      .eq("company_id", profile.company_id);
+    savedSet = new Set((saved || []).map((s) => s.candidate_id));
+  }
+
+  const result = filtered.map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    phone: c.phone,
+    resume_url: c.resume_url,
+    photo_url: c.photo_url,
+    college: c.colleges?.name || c.college_other || "—",
+    degree: c.degree || "—",
+    branch: c.branch || "—",
+    cgpa: c.cgpa ?? null,
+    location: c.location || c.colleges?.name || "—",
+    skills: c.skills || "",
+    experience_years: c.experience_years ?? null,
+    linkedin_url: c.linkedin_url || null,
+    github_url: c.github_url || null,
+    match: matchByCandidate[c.id]?.match ?? null,
+    applicationStage: matchByCandidate[c.id]?.stage ?? null,
+    saved: savedSet.has(c.id),
+  }));
+
+  res.json(result);
+});
+
+// Corporate: save a candidate for later
+app.post("/api/corporate/candidates/:candidateId/save", async (req, res) => {
+  const profile = await getRequestProfile(supabase, req);
+  if (!profile || profile.role !== "corporate" || !profile.company_id) {
+    return res.status(403).json({ error: "Corporate access required" });
+  }
+
+  const { error } = await supabase
+    .from("saved_candidates")
+    .upsert(
+      [{ company_id: profile.company_id, candidate_id: req.params.candidateId }],
+      { onConflict: "company_id,candidate_id" },
+    );
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// Corporate: unsave a candidate
+app.delete("/api/corporate/candidates/:candidateId/save", async (req, res) => {
+  const profile = await getRequestProfile(supabase, req);
+  if (!profile || profile.role !== "corporate" || !profile.company_id) {
+    return res.status(403).json({ error: "Corporate access required" });
+  }
+
+  const { error } = await supabase
+    .from("saved_candidates")
+    .delete()
+    .eq("company_id", profile.company_id)
+    .eq("candidate_id", req.params.candidateId);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});

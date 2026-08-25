@@ -33,6 +33,9 @@ import Approvals from "./pages/Approvals";
 import Documents from "./pages/Documents";
 import AdminDashboard from "./pages/AdminDashboard";
 import RecruiterDashboard from "./pages/RecruiterDashboard";
+import CompanyProfile from "./pages/CompanyProfile";
+import CandidateSearch from "./pages/CandidateSearch";
+import HiringAnalytics from "./pages/HiringAnalytics";
 
 // Pages available to admin
 const pages = {
@@ -82,6 +85,7 @@ export default function App() {
   const [profileApproved, setProfileApproved] = useState(null);
   const [userRole, setUserRole] = useState(null);
   const [activePage, setActivePage] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -130,6 +134,18 @@ export default function App() {
 
     checkApproval();
   }, [session]);
+
+  // Lock background scroll while the mobile sidebar drawer is open
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [sidebarOpen]);
 
   if (window.location.pathname.startsWith("/gd/")) {
     return <GDRoom />;
@@ -253,17 +269,20 @@ export default function App() {
     }
 
     // Corporate-only pages
-    const corporatePages = {
-      corporateDashboard: CorporateDashboard,
-      jobs: Jobs,
-      pipeline: Pipeline,
-      resume: Resume,
-      interview: Interview,
-      offers: Offers,
-      joining: Joining,
-      approvals: Approvals,
-      documents: Documents,
-    };
+const corporatePages = {
+  corporateDashboard: CorporateDashboard,
+  companyProfile: CompanyProfile,
+  jobs: Jobs,
+  candidateSearch: CandidateSearch,  
+  hiringAnalytics: HiringAnalytics, 
+  pipeline: Pipeline,
+  resume: Resume,
+  interview: Interview,
+  offers: Offers,
+  joining: Joining,
+  approvals: Approvals,
+  documents: Documents,
+};
 
     let PageComponent;
     const sidebarRole =
@@ -284,9 +303,22 @@ export default function App() {
       PageComponent = pages[activePage] || Dashboard;
     }
 
+    function handleSetActivePage(page) {
+      setActivePage(page);
+      setSidebarOpen(false);
+    }
+
     return (
       <div id="screen-app" style={{ display: "block" }}>
         <div className="topbar">
+          <button
+            type="button"
+            className="hamburger-btn"
+            aria-label="Open menu"
+            onClick={() => setSidebarOpen(true)}
+          >
+            ☰
+          </button>
           <div
             className="brand"
             style={{
@@ -319,10 +351,15 @@ export default function App() {
           </div>
         </div>
         <div className="app">
+          <div
+            className={`sidebar-backdrop ${sidebarOpen ? "open" : ""}`}
+            onClick={() => setSidebarOpen(false)}
+          />
           <Sidebar
             activePage={activePage}
-            setActivePage={setActivePage}
+            setActivePage={handleSetActivePage}
             role={sidebarRole}
+            className={sidebarOpen ? "open" : ""}
           />
           <div className="main">
             <PageComponent setActivePage={setActivePage} user={session.user} />
@@ -333,4 +370,65 @@ export default function App() {
   }
 
   return <LoginSelect />;
+}
+
+// Add these to src/lib/api.js
+// Follows the same pattern as searchCandidates / saveCandidate / unsaveCandidate
+
+/* =========================================================
+   COMPANY PROFILE (Step 2)
+========================================================= */
+
+export async function getCompanyProfile() {
+  const headers = await authHeaders();
+  const res = await fetch(
+    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/profile`,
+    { headers },
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load company profile");
+  return data;
+}
+
+export async function saveCompanyProfile(profile) {
+  const headers = await authHeaders();
+  const res = await fetch(
+    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/profile`,
+    {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    },
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to save company profile");
+  return data;
+}
+
+export async function uploadCompanyLogo(file) {
+  const headers = await authHeaders();
+  const formData = new FormData();
+  formData.append("logo", file);
+  const res = await fetch(
+    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/profile/logo`,
+    { method: "POST", headers, body: formData },
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to upload company logo");
+  return data.logo_url;
+}
+
+/* =========================================================
+   HIRING ANALYTICS (Step 4)
+========================================================= */
+
+export async function getHiringAnalytics() {
+  const headers = await authHeaders();
+  const res = await fetch(
+    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/analytics/hiring`,
+    { headers },
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load hiring analytics");
+  return data;
 }

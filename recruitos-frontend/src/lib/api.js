@@ -480,6 +480,7 @@ export async function uploadPhoto(file) {
 export async function createCandidate({
   name, email, phone, college_id, college_other, resume_url, photo_url,
   degree, branch, cgpa, passing_year, active_backlogs, tenth_percentage, twelfth_percentage,
+  skills, linkedin_url, github_url,   // ⭐ NEW
 }) {
   const payload = {
     name, phone,
@@ -493,6 +494,9 @@ export async function createCandidate({
     active_backlogs: !!active_backlogs,
     tenth_percentage: tenth_percentage ? Number(tenth_percentage) : null,
     twelfth_percentage: twelfth_percentage ? Number(twelfth_percentage) : null,
+    skills: skills && skills.length ? skills : null,        // ⭐ NEW
+    linkedin_url: linkedin_url || null,                      // ⭐ NEW
+    github_url: github_url || null,                          // ⭐ NEW
   };
 
   const { data: existing, error: lookupError } = await supabase
@@ -684,4 +688,110 @@ export async function getCorporateKpis() {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to load KPIs');
   return data;
+}
+
+export async function saveCandidate(candidateId) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not logged in');
+  const { error } = await supabase
+    .from('saved_candidates')
+    .insert([{ company_user_id: user.id, candidate_id: candidateId }]);
+  if (error) throw error;
+}
+
+export async function unsaveCandidate(candidateId) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not logged in');
+  const { error } = await supabase
+    .from('saved_candidates')
+    .delete()
+    .eq('company_user_id', user.id)
+    .eq('candidate_id', candidateId);
+  if (error) throw error;
+}
+
+export async function searchCandidates(filters = {}) {
+  let query = supabase
+    .from('candidates')
+    .select(`
+      id, name, email, phone, cgpa, skills, resume_url,
+      linkedin_url, github_url, degree, branch,
+      college_id, college_other, colleges ( name, city )
+    `);
+
+  if (filters.name) query = query.ilike('name', `%${filters.name}%`);
+  if (filters.degree) query = query.ilike('degree', `%${filters.degree}%`);
+  if (filters.branch) query = query.ilike('branch', `%${filters.branch}%`);
+  if (filters.minCgpa) query = query.gte('cgpa', Number(filters.minCgpa));
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  // Get saved candidate ids for the logged-in company user
+  const { data: { user } } = await supabase.auth.getUser();
+  let savedIds = new Set();
+  if (user) {
+    const { data: saved } = await supabase
+      .from('saved_candidates')
+      .select('candidate_id')
+      .eq('company_user_id', user.id);
+    savedIds = new Set((saved || []).map((s) => s.candidate_id));
+  }
+
+  let results = (data || []).map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    phone: c.phone,
+    college: c.colleges?.name || c.college_other || '—',
+    location: c.colleges?.city || '—',
+    degree: c.degree || '—',
+    branch: c.branch || '—',
+    cgpa: c.cgpa,
+    skills: Array.isArray(c.skills) ? c.skills.join(', ') : (c.skills || ''),
+    experience_years: null, // freshers — no experience tracked yet
+    resume_url: c.resume_url,
+    linkedin_url: c.linkedin_url,
+    github_url: c.github_url,
+    match: null, // wired up in AI Match Score step (Step 6)
+    saved: savedIds.has(c.id),
+  }));
+
+  // Client-side filters for fields not directly queryable above
+  if (filters.college) {
+    const q = filters.college.toLowerCase();
+    results = results.filter((c) => c.college.toLowerCase().includes(q));
+  }
+  if (filters.skills) {
+    const q = filters.skills.toLowerCase();
+    results = results.filter((c) => c.skills.toLowerCase().includes(q));
+  }
+  if (filters.location) {
+    const q = filters.location.toLowerCase();
+    results = results.filter((c) => c.location.toLowerCase().includes(q));
+  }
+
+  return results;
+}
+
+export async function getHiringAnalytics() {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/hiring-analytics`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load hiring analytics');
+  return data;
+}
+
+// ---------- Job Match Score ----------
+export function computeMatchScore(candidateSkills, jobSkills) {
+  const normalize = (skills) => {
+    if (!skills) return [];
+    const arr = Array.isArray(skills) ? skills : skills.split(',');
+    return arr.map((s) => s.trim().toLowerCase()).filter(Boolean);
+  };
+  const candSet = new Set(normalize(candidateSkills));
+  const jobList = normalize(jobSkills);
+  if (jobList.length === 0) return null;
+  const matched = jobList.filter((s) => candSet.has(s));
+  return Math.round((matched.length / jobList.length) * 100);
 }

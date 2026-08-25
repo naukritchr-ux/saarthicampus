@@ -29,7 +29,7 @@ const NAV = {
     ]},
   ],
 
-recruiter: [
+  recruiter: [
     { section: 'Overview', items: [{ key: 'recruiterDashboard', icon: '◆', label: 'Dashboard' }] },
     { section: 'Database', items: [
       { key: 'campusdb', icon: '▤', label: 'Campus Database' },
@@ -50,19 +50,26 @@ recruiter: [
       { key: 'notifications', icon: '🔔', label: 'Notifications' },
       { key: 'calendartasks', icon: '📅', label: 'Calendar & Tasks' },
     ]},
-],
+  ],
 
-  corporate: [
-    { section: 'Overview', items: [{ key: 'corporateDashboard', icon: '◆', label: 'Company Dashboard' }] },
-    { section: 'Hiring', items: [
-      { key: 'jobs', icon: '▤', label: 'Job Postings' },
-      { key: 'resume', icon: '→', label: 'Applications' },
-      { key: 'interview', icon: '→', label: 'Interviews' },
-      { key: 'offers', icon: '●', label: 'Offer Letters' },
-      { key: 'joining', icon: '●', label: 'Employee (Joined)' },
-      { key: 'approvals', icon: '✓', label: 'Approvals' },
-      { key: 'documents', icon: '📄', label: 'Documents' },
-    ]},
+corporate: [
+  { section: 'Overview', items: [
+    { key: 'corporateDashboard', icon: '◆', label: 'Company Dashboard' },
+    { key: 'companyProfile', icon: '🏢', label: 'Company Profile' },
+  ]},
+  { section: 'Hiring', items: [
+    { key: 'jobs', icon: '▤', label: 'Job Postings' },
+    { key: 'candidateSearch', icon: '🔍', label: 'Candidate Search' },
+    { key: 'resume', icon: '→', label: 'Applications' },
+    { key: 'interview', icon: '→', label: 'Interviews' },
+    { key: 'offers', icon: '●', label: 'Offer Letters' },
+    { key: 'joining', icon: '●', label: 'Employee (Joined)' },
+    { key: 'approvals', icon: '✓', label: 'Approvals' },
+    { key: 'documents', icon: '📄', label: 'Documents' },
+  ]},
+  { section: 'Analytics', items: [                                  // ⭐ NEW
+    { key: 'hiringAnalytics', icon: '📊', label: 'Hiring Analytics' }, // ⭐ NEW
+  ]},                                                                  // ⭐ NEW
 ],
 
   candidate: [
@@ -82,10 +89,10 @@ recruiter: [
   ],
 };
 
-export default function Sidebar({ activePage, setActivePage, role = 'admin' }) {
+export default function Sidebar({ activePage, setActivePage, role = 'admin', className = '' }) {
   const nav = NAV[role] || NAV.admin;
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${className}`}>
       {nav.map((group) => (
         <div key={group.section}>
           <div className="side-section-label">{group.section}</div>
