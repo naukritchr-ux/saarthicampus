@@ -64,8 +64,12 @@ const pages = {
 };
 
 // Pages available to recruiter
+// FIX: campusdb, corpdb, pipeline, comm were missing — those sidebar
+// links were falling back to RecruiterDashboard.
 const recruiterPages = {
   recruiterDashboard: RecruiterDashboard,
+  campusdb: CampusDB,
+  corpdb: CorpDB,
   jobs: Jobs,
   resume: Resume,
   aptitude: Aptitude,
@@ -73,7 +77,9 @@ const recruiterPages = {
   interview: Interview,
   offers: Offers,
   joining: Joining,
+  pipeline: Pipeline,
   candidatedb: CandidateDB,
+  comm: Comm,
   reports: Reports,
   notifications: Notifications,
   calendartasks: CalendarTasks,
@@ -269,20 +275,20 @@ export default function App() {
     }
 
     // Corporate-only pages
-const corporatePages = {
-  corporateDashboard: CorporateDashboard,
-  companyProfile: CompanyProfile,
-  jobs: Jobs,
-  candidateSearch: CandidateSearch,  
-  hiringAnalytics: HiringAnalytics, 
-  pipeline: Pipeline,
-  resume: Resume,
-  interview: Interview,
-  offers: Offers,
-  joining: Joining,
-  approvals: Approvals,
-  documents: Documents,
-};
+    const corporatePages = {
+      corporateDashboard: CorporateDashboard,
+      companyProfile: CompanyProfile,
+      jobs: Jobs,
+      candidateSearch: CandidateSearch,
+      hiringAnalytics: HiringAnalytics,
+      pipeline: Pipeline,
+      resume: Resume,
+      interview: Interview,
+      offers: Offers,
+      joining: Joining,
+      approvals: Approvals,
+      documents: Documents,
+    };
 
     let PageComponent;
     const sidebarRole =
@@ -370,65 +376,4 @@ const corporatePages = {
   }
 
   return <LoginSelect />;
-}
-
-// Add these to src/lib/api.js
-// Follows the same pattern as searchCandidates / saveCandidate / unsaveCandidate
-
-/* =========================================================
-   COMPANY PROFILE (Step 2)
-========================================================= */
-
-export async function getCompanyProfile() {
-  const headers = await authHeaders();
-  const res = await fetch(
-    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/profile`,
-    { headers },
-  );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to load company profile");
-  return data;
-}
-
-export async function saveCompanyProfile(profile) {
-  const headers = await authHeaders();
-  const res = await fetch(
-    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/profile`,
-    {
-      method: "PUT",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify(profile),
-    },
-  );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to save company profile");
-  return data;
-}
-
-export async function uploadCompanyLogo(file) {
-  const headers = await authHeaders();
-  const formData = new FormData();
-  formData.append("logo", file);
-  const res = await fetch(
-    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/profile/logo`,
-    { method: "POST", headers, body: formData },
-  );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to upload company logo");
-  return data.logo_url;
-}
-
-/* =========================================================
-   HIRING ANALYTICS (Step 4)
-========================================================= */
-
-export async function getHiringAnalytics() {
-  const headers = await authHeaders();
-  const res = await fetch(
-    `${import.meta.env.VITE_BACKEND_URL}/api/corporate/analytics/hiring`,
-    { headers },
-  );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to load hiring analytics");
-  return data;
 }

@@ -13,6 +13,7 @@
 
   --admin-blue: #2c9ed8;
   --admin-blue-soft: #e8f6ff;
+  --admin-cyan: #2c9ed8;
 
   --admin-green: #16a878;
   --admin-green-soft: #e7f8f1;
@@ -29,6 +30,7 @@
   color-scheme: light;
 }
 
+/* OS-level dark mode (works only if the user's system/browser is in dark mode) */
 @media (prefers-color-scheme: dark) {
   :root {
     --admin-bg: #11131c;
@@ -45,6 +47,7 @@
 
     --admin-blue: #4fc5ed;
     --admin-blue-soft: rgba(79, 197, 237, 0.13);
+    --admin-cyan: #4fc5ed;
 
     --admin-green: #48d09e;
     --admin-green-soft: rgba(72, 208, 158, 0.13);
@@ -60,6 +63,44 @@
 
     color-scheme: dark;
   }
+}
+
+/* App's manual dark-mode toggle (class/attribute based).
+   IMPORTANT: change "html.dark, body.dark, [data-theme='dark']" below
+   to match whatever class/attribute your app actually adds when the
+   user clicks the dark-mode toggle. Check via DevTools -> <html>/<body> tag. */
+html.dark,
+body.dark,
+[data-theme="dark"] {
+  --admin-bg: #11131c;
+  --admin-surface: #191c28;
+  --admin-surface-soft: #202432;
+  --admin-text: #f4f5fb;
+  --admin-muted: #9da5b8;
+  --admin-border: #2c3243;
+  --admin-border-strong: #3b4257;
+
+  --admin-purple: #a18cff;
+  --admin-purple-dark: #8f76fa;
+  --admin-purple-soft: rgba(161, 140, 255, 0.14);
+
+  --admin-blue: #4fc5ed;
+  --admin-blue-soft: rgba(79, 197, 237, 0.13);
+  --admin-cyan: #4fc5ed;
+
+  --admin-green: #48d09e;
+  --admin-green-soft: rgba(72, 208, 158, 0.13);
+
+  --admin-orange: #f5bd5c;
+  --admin-orange-soft: rgba(245, 189, 92, 0.13);
+
+  --admin-red: #f17d91;
+  --admin-red-soft: rgba(241, 125, 145, 0.13);
+
+  --admin-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  --admin-shadow-hover: 0 18px 42px rgba(0, 0, 0, 0.34);
+
+  color-scheme: dark;
 }
 
 * {
@@ -1096,10 +1137,11 @@ textarea:focus-visible {
 
 /* ============================================
    Platform Adoption section
-   Append this block to the end of AdminDashboard.css
    Reuses existing .card / .card-heading / .full-width
-   classes already defined in the file — only new
-   classes below.
+   classes already defined above — only new classes below.
+   All colors now use CSS variables so they follow both
+   the OS dark-mode media query AND the app's manual
+   dark-mode class/attribute toggle defined near the top.
    ============================================ */
 
 .adoption-card {
@@ -1120,10 +1162,10 @@ textarea:focus-visible {
 }
 
 .adoption-item {
-  border: 1px solid #eee;
+  border: 1px solid var(--admin-border);
   border-radius: 14px;
   padding: 18px 20px;
-  background: #fafafa;
+  background: var(--admin-surface-soft);
 }
 
 .adoption-item-top {
@@ -1136,7 +1178,7 @@ textarea:focus-visible {
 .adoption-item-top span {
   font-size: 13px;
   font-weight: 600;
-  color: #555;
+  color: var(--admin-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1156,19 +1198,19 @@ textarea:focus-visible {
 .adoption-value strong {
   font-size: 28px;
   font-weight: 700;
-  color: #111;
+  color: var(--admin-text);
 }
 
 .adoption-value small {
   font-size: 14px;
-  color: #999;
+  color: var(--admin-muted);
 }
 
 .adoption-progress {
   width: 100%;
   height: 8px;
   border-radius: 999px;
-  background: #ececec;
+  background: var(--admin-border);
   overflow: hidden;
   margin-bottom: 8px;
 }
@@ -1176,13 +1218,13 @@ textarea:focus-visible {
 .adoption-progress-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #8B5CF6, #EC4899);
+  background: linear-gradient(90deg, var(--admin-purple), var(--admin-purple-dark));
   transition: width 0.3s ease;
 }
 
 .adoption-percent {
   font-size: 11.5px;
-  color: #888;
+  color: var(--admin-muted);
   margin-bottom: 10px;
 }
 
@@ -1191,11 +1233,11 @@ textarea:focus-visible {
   flex-wrap: wrap;
   gap: 10px;
   padding-top: 10px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--admin-border);
   font-size: 12px;
-  color: #666;
+  color: var(--admin-muted);
 }
 
 .adoption-breakdown strong {
-  color: #111;
+  color: var(--admin-text);
 }

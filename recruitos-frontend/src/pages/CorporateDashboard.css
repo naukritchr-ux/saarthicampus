@@ -694,3 +694,88 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================
+   DARK MODE OVERRIDES
+========================================================= */
+
+[data-theme="dark"] body {
+  background-color: #11131d;
+  color: #f4f5fb;
+}
+
+[data-theme="dark"] .corporate-sidebar,
+[data-theme="dark"] .corporate-topbar,
+[data-theme="dark"] .corporate-stat-card,
+[data-theme="dark"] .corporate-card,
+[data-theme="dark"] .corporate-chart-card,
+[data-theme="dark"] .corporate-modal {
+  background-color: #191c29;
+  border-color: #2d3244;
+}
+
+[data-theme="dark"] .corporate-brand h2,
+[data-theme="dark"] .corporate-topbar h1,
+[data-theme="dark"] .corporate-stat-card h3,
+[data-theme="dark"] .corporate-card-header h3,
+[data-theme="dark"] .corporate-detail-grid strong,
+[data-theme="dark"] .corporate-table td {
+  color: #f4f5fb;
+}
+
+[data-theme="dark"] .corporate-brand span,
+[data-theme="dark"] .corporate-topbar p,
+[data-theme="dark"] .corporate-stat-card p,
+[data-theme="dark"] .corporate-card-header p,
+[data-theme="dark"] .corporate-menu-title,
+[data-theme="dark"] .corporate-menu-item,
+[data-theme="dark"] .corporate-filter-field label,
+[data-theme="dark"] .corporate-pagination,
+[data-theme="dark"] .corporate-empty {
+  color: #9da3b8;
+}
+
+[data-theme="dark"] .corporate-menu-item:hover {
+  background-color: rgba(185, 120, 255, 0.12);
+  color: #c49aff;
+}
+
+[data-theme="dark"] .corporate-stat-icon,
+[data-theme="dark"] .corporate-notification,
+[data-theme="dark"] .corporate-toggle,
+[data-theme="dark"] .corporate-location-row,
+[data-theme="dark"] .corporate-profile-row,
+[data-theme="dark"] .corporate-detail-grid div,
+[data-theme="dark"] .corporate-table th,
+[data-theme="dark"] .corporate-close-button,
+[data-theme="dark"] .corporate-pagination button {
+  background: #202433;
+  color: #f4f5fb;
+  border-color: #2d3244;
+}
+
+[data-theme="dark"] .corporate-toggle button.active {
+  background: #2d3244;
+  color: #c49aff;
+}
+
+[data-theme="dark"] .corporate-quick-filters select,
+[data-theme="dark"] .corporate-filters select,
+[data-theme="dark"] .corporate-filters input,
+[data-theme="dark"] .corporate-modal-match-filter select {
+  background: #202433;
+  color: #f4f5fb;
+  border-color: #2d3244;
+}
+
+[data-theme="dark"] .corporate-table-wrapper {
+  border-color: #2d3244;
+}
+
+[data-theme="dark"] .corporate-table th {
+  border-bottom-color: #2d3244;
+}
+
+[data-theme="dark"] .corporate-table td {
+  border-bottom-color: #2d3244;
+}
