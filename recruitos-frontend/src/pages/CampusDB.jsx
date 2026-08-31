@@ -18,6 +18,7 @@ const courses = [
   "Arts",
   "Medical",
   "Polytechnic",
+  "Others",
 ];
 
 const statusColors = {
@@ -50,6 +51,7 @@ const emptyForm = {
 
 export default function CampusDB() {
   const [activeCourse, setActiveCourse] = useState("All");
+  const [customCourseText, setCustomCourseText] = useState("");
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("All Status");
 
@@ -171,13 +173,29 @@ export default function CampusDB() {
     const courseValue = (c.course ?? "").toLowerCase().trim();
     const coursesAvailableValue = (c.courses_available ?? "").toLowerCase();
 
-    const activeCourseValue = activeCourse.toLowerCase().trim();
+    let matchCourse;
 
-    const matchCourse =
-      activeCourse === "All"
-        ? true
-        : courseValue.includes(activeCourseValue) ||
-          coursesAvailableValue.includes(activeCourseValue);
+    if (activeCourse === "All") {
+      matchCourse = true;
+    } else if (activeCourse === "Others") {
+      const typed = customCourseText.toLowerCase().trim();
+      // With nothing typed yet, "Others" shows colleges whose course
+      // doesn't match any of the preset course names.
+      const presetLower = courses
+        .filter((c) => c !== "All" && c !== "Others")
+        .map((c) => c.toLowerCase());
+      matchCourse =
+        typed === ""
+          ? !presetLower.some(
+              (p) => courseValue.includes(p) || coursesAvailableValue.includes(p),
+            )
+          : courseValue.includes(typed) || coursesAvailableValue.includes(typed);
+    } else {
+      const activeCourseValue = activeCourse.toLowerCase().trim();
+      matchCourse =
+        courseValue.includes(activeCourseValue) ||
+        coursesAvailableValue.includes(activeCourseValue);
+    }
 
     const q = search.toLowerCase().trim();
 
@@ -961,12 +979,30 @@ export default function CampusDB() {
             <span
               key={c}
               className={`course-chip ${activeCourse === c ? "sel" : ""}`}
-              onClick={() => setActiveCourse(c)}
+              onClick={() => {
+                setActiveCourse(c);
+                if (c !== "Others") setCustomCourseText("");
+              }}
             >
               {c}
             </span>
           ))}
         </div>
+
+        {/* CUSTOM "OTHERS" COURSE INPUT */}
+
+        {activeCourse === "Others" && (
+          <div style={{ marginTop: 10 }}>
+            <input
+              className="search-box"
+              style={{ maxWidth: 320 }}
+              placeholder="Type a course name (e.g. BDes, BArch...)"
+              value={customCourseText}
+              onChange={(e) => setCustomCourseText(e.target.value)}
+              autoFocus
+            />
+          </div>
+        )}
 
         {/* SEARCH + STATUS FILTER */}
 
@@ -1318,26 +1354,41 @@ export default function CampusDB() {
                 }
               />
 
-              <select
-                className="search-box"
-                value={form.course}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    course: e.target.value,
-                  })
-                }
-              >
-                <option value="">— No course —</option>
+              {form.course === "Others" || (form.course && !courses.includes(form.course)) ? (
+                <input
+                  className="search-box"
+                  placeholder="Type course name"
+                  value={form.course === "Others" ? "" : form.course}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      course: e.target.value,
+                    })
+                  }
+                  autoFocus
+                />
+              ) : (
+                <select
+                  className="search-box"
+                  value={form.course}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      course: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">— No course —</option>
 
-                {courses
-                  .filter((c) => c !== "Unassigned" && c !== "All")
-                  .map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-              </select>
+                  {courses
+                    .filter((c) => c !== "Unassigned" && c !== "All")
+                    .map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                </select>
+              )}
 
               <input
                 className="search-box"

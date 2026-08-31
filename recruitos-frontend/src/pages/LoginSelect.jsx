@@ -42,8 +42,8 @@ const cards = [
     role: "Corporate",
     icon: Building2,
     path: "/login/corporate",
-    ringColor: "linear-gradient(135deg, #34D399, #059669)",
-    buttonColor: "linear-gradient(90deg, #059669, #10B981)",
+    ringColor: "linear-gradient(135deg, #22B8CF, #0E7C99)",
+    buttonColor: "linear-gradient(90deg, #0E7C99, #22B8CF)",
     desc: "Manage company profile, jobs, and recruitment activities.",
     features: [
       { icon: LayoutDashboard, label: "Company Dashboard" },
@@ -52,14 +52,14 @@ const cards = [
       { icon: UserCog, label: "Team Management" },
       { icon: BarChart3, label: "Reports & Analytics" },
     ],
-    featureColor: "#059669",
+    featureColor: "#0E7C99",
   },
   {
     role: "Admin",
     icon: ShieldCheck,
     path: "/login/admin",
-    ringColor: "linear-gradient(135deg, #FB923C, #EA580C)",
-    buttonColor: "linear-gradient(90deg, #EA580C, #F97316)",
+    ringColor: "linear-gradient(135deg, #F0508B, #E11D74)",
+    buttonColor: "linear-gradient(90deg, #E11D74, #F0508B)",
     desc: "Manage platform users, roles, permissions and system settings.",
     features: [
       { icon: Users, label: "User Management" },
@@ -68,15 +68,15 @@ const cards = [
       { icon: Activity, label: "Activity Logs" },
       { icon: Database, label: "Data & Reports" },
     ],
-    featureColor: "#EA580C",
+    featureColor: "#E11D74",
   },
 ];
 
 const trustItems = [
   { icon: ShieldCheck, title: "Secure & Compliant", sub: "Enterprise-grade security", color: "#8B5CF6" },
-  { icon: Cpu, title: "AI Powered", sub: "Smart matching & insights", color: "#2563EB" },
-  { icon: TrendingUp, title: "Real-time Analytics", sub: "Data-driven decisions", color: "#059669" },
-  { icon: Layers, title: "Scalable Platform", sub: "Built for your growth", color: "#EA580C" },
+  { icon: Cpu, title: "AI Powered", sub: "Smart matching & insights", color: "#22B8CF" },
+  { icon: TrendingUp, title: "Real-time Analytics", sub: "Data-driven decisions", color: "#F0508B" },
+  { icon: Layers, title: "Scalable Platform", sub: "Built for your growth", color: "#8B5CF6" },
 ];
 
 export default function SaarthiCampusLanding() {
@@ -87,9 +87,10 @@ export default function SaarthiCampusLanding() {
         width: "100%",
         backgroundImage: `url(${campusBg})`,
         backgroundSize: "cover",
-        backgroundPosition: "center",
+        backgroundPosition: "center bottom",
         backgroundRepeat: "no-repeat",
-        backgroundColor: "#fff",
+        backgroundAttachment: "local",
+        backgroundColor: "#eeecfb",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -98,52 +99,18 @@ export default function SaarthiCampusLanding() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 1280 }}>
-        {/* top bar */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: 16,
-            marginBottom: 56,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-            <img
-              src={logoImg}
-              alt="Saarthi Logo"
-              style={{
-                display: "block",
-                alignSelf: "center",
-                height: 90,
-                width: "auto",
-                objectFit: "contain",
-              }}
-            />
-            {/* <span style={{ fontSize: 22, fontWeight: 800, color: "#6c4e07" }}>Saarthi</span>
-            <span
-              style={{
-                borderRadius: 999,
-                background: "linear-gradient(90deg, #7C3AED, #4F46E5)",
-                padding: "4px 12px",
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: "0.05em",
-                color: "#693906",
-              }}
-            >
-              CAMPUS
-            </span> */}
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#f1f3f8" }}>
-              Powering Connections. Building Futures.
-            </p>
-            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
-              AI-Powered Campus Recruitment Platform
-            </p>
-          </div>
+        {/* logo */}
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 56 }}>
+          <img
+            src={logoImg}
+            alt="Saarthi Campus"
+            style={{
+              display: "block",
+              height: 72,
+              width: "auto",
+              objectFit: "contain",
+            }}
+          />
         </div>
 
         {/* heading + cards */}
@@ -161,7 +128,7 @@ export default function SaarthiCampusLanding() {
               <br />
               <span
                 style={{
-                  background: "linear-gradient(90deg, #320a4e40, #3e105f4e)",
+                  background: "linear-gradient(90deg, #7C3AED, #3B82F6)",
                   WebkitBackgroundClip: "text",
                   WebkitTextFillColor: "transparent",
                   backgroundClip: "text",
@@ -171,12 +138,12 @@ export default function SaarthiCampusLanding() {
               </span>
             </h1>
             <div style={{ marginTop: 16, height: 4, width: 64, borderRadius: 999, background: "linear-gradient(90deg, #7C3AED, #3B82F6)" }} />
-            <p style={{ marginTop: 24, fontSize: 16, color: "#07090d", lineHeight: 1.6 }}>
+            <p style={{ marginTop: 24, fontSize: 16, color: "#475569", lineHeight: 1.6 }}>
               Smart recruitment. Better connections.
               <br />
               One platform for all your hiring needs.
             </p>
-            <p style={{ marginTop: 32, fontSize: 14, fontWeight: 700, color: "#000000" }}>
+            <p style={{ marginTop: 32, fontSize: 15, fontWeight: 700, color: "#1e293b" }}>
               Choose your login to continue
             </p>
           </div>
@@ -185,7 +152,7 @@ export default function SaarthiCampusLanding() {
             style={{
               display: "grid",
               gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: 20,
+              gap: 24,
             }}
           >
             {cards.map(({ role, icon: Icon, path, ringColor, buttonColor, desc, features, featureColor }) => (
@@ -194,16 +161,14 @@ export default function SaarthiCampusLanding() {
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  borderRadius: 16,
-                  border: "1px solid #f1f5f9",
+                  borderRadius: 18,
                   background: "#fff",
-                  padding: 20,
-                  boxShadow: "0 4px 14px rgba(15,23,42,0.06)",
+                  padding: 28,
+                  boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
                 }}
               >
                 <div
                   style={{
-                    margin: "0 auto",
                     width: 64,
                     height: 64,
                     borderRadius: "50%",
@@ -212,22 +177,23 @@ export default function SaarthiCampusLanding() {
                     alignItems: "center",
                     justifyContent: "center",
                     color: "#fff",
-                    boxShadow: "0 4px 10px rgba(0,0,0,0.12)",
+                    boxShadow: "0 6px 16px rgba(0,0,0,0.15)",
+                    marginBottom: 18,
                   }}
                 >
                   <Icon size={28} />
                 </div>
-                <h3 style={{ marginTop: 16, marginBottom: 8, fontSize: 18, fontWeight: 800, textAlign: "center", color: "#0f172a" }}>
+                <h3 style={{ margin: "0 0 10px", fontSize: 19, fontWeight: 800, color: "#0f172a" }}>
                   {role} Login
                 </h3>
-                <p style={{ margin: "0 0 16px", fontSize: 12.5, lineHeight: 1.6, textAlign: "center", color: "#64748b", minHeight: 58 }}>
+                <p style={{ margin: "0 0 18px", fontSize: 13, lineHeight: 1.6, color: "#64748b" }}>
                   {desc}
                 </p>
-                <div style={{ borderTop: "1px dashed #e2e8f0", margin: "0 0 16px" }} />
-                <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", flex: 1 }}>
+                <div style={{ borderTop: "1px dashed #e2e8f0", margin: "0 0 18px" }} />
+                <ul style={{ listStyle: "none", padding: 0, margin: "0 0 22px", flex: 1 }}>
                   {features.map(({ icon: FIcon, label }) => (
-                    <li key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155", padding: "5px 0" }}>
-                      <FIcon size={16} color={featureColor} style={{ flexShrink: 0 }} />
+                    <li key={label} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13.5, color: "#334155", padding: "6px 0" }}>
+                      <FIcon size={17} color={featureColor} style={{ flexShrink: 0 }} />
                       {label}
                     </li>
                   ))}
@@ -240,10 +206,10 @@ export default function SaarthiCampusLanding() {
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 6,
-                    borderRadius: 10,
+                    borderRadius: 12,
                     border: "none",
-                    padding: "12px 16px",
-                    fontSize: 14,
+                    padding: "14px 16px",
+                    fontSize: 14.5,
                     fontWeight: 700,
                     color: "#fff",
                     background: buttonColor,
@@ -251,7 +217,7 @@ export default function SaarthiCampusLanding() {
                   }}
                 >
                   Login as {role}
-                  <ArrowRight size={16} />
+                  <ArrowRight size={17} />
                 </button>
               </div>
             ))}
@@ -261,25 +227,32 @@ export default function SaarthiCampusLanding() {
         {/* trust strip */}
         <div
           style={{
-            marginTop: 48,
+            marginTop: 56,
             display: "grid",
             gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            gap: 24,
-            borderRadius: 16,
-            border: "1px solid #f1f5f9",
-            background: "rgba(255,255,255,0.92)",
-            padding: 24,
-            boxShadow: "0 4px 14px rgba(15,23,42,0.06)",
+            borderRadius: 18,
+            background: "rgba(255,255,255,0.95)",
+            padding: "26px 28px",
+            boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
           }}
         >
-          {trustItems.map(({ icon: Icon, title, sub, color }) => (
-            <div key={title} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {trustItems.map(({ icon: Icon, title, sub, color }, i) => (
+            <div
+              key={title}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                borderLeft: i === 0 ? "none" : "1px solid #f1f5f9",
+                paddingLeft: i === 0 ? 0 : 24,
+              }}
+            >
               <div
                 style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 10,
-                  background: "#f8fafc",
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: `${color}1A`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -287,10 +260,10 @@ export default function SaarthiCampusLanding() {
                   flexShrink: 0,
                 }}
               >
-                <Icon size={20} />
+                <Icon size={21} />
               </div>
               <div>
-                <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>{title}</p>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#1e293b" }}>{title}</p>
                 <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>{sub}</p>
               </div>
             </div>

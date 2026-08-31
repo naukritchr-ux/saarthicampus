@@ -8,7 +8,7 @@ const router = express.Router();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
-const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'openai/gpt-oss-120b';
 
 router.post('/generate', async (req, res) => {
   try {
@@ -49,10 +49,10 @@ ${jobContext}
 
 Difficulty level: ${resolvedDifficulty}
 
-Mix these topic areas roughly evenly: quantitative/numerical reasoning, logical reasoning, verbal ability, and basic role-relevant technical/domain knowledge (based on the key skills above, if any).
+Mix these topic areas roughly evenly: quantitative/numerical reasoning, logical reasoning, verbal ability, general knowledge/current affairs, and basic role-relevant technical/domain knowledge (based on the key skills above, if any).
 
 Respond with ONLY valid JSON, no markdown, no code fences, no explanation, in exactly this shape:
-{"questions": [{"q": "<question text>", "options": ["<A>", "<B>", "<C>", "<D>"], "answer": "<the correct option text, must exactly match one of the options>", "topic": "<Quantitative|Logical|Verbal|Technical>", "difficulty": "${resolvedDifficulty}"}]}`;
+{"questions": [{"q": "<question text>", "options": ["<A>", "<B>", "<C>", "<D>"], "answer": "<the correct option text, must exactly match one of the options>", "topic": "<Quantitative|Logical|Verbal|GK|Technical>", "difficulty": "${resolvedDifficulty}"}]}`;
 
     const completion = await groq.chat.completions.create({
       model: MODEL,

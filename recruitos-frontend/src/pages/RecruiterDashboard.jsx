@@ -38,7 +38,11 @@ const stageBadgeClass = {
   Rejected: "gray",
 };
 
-export default function RecruiterDashboard({ user }) {
+const PRIORITY_COLOR = { high: "#EF4444", medium: "#F59E0B", low: "#10B981" };
+const EVENT_COLOR = { drive: "#7C3AED", interview: "#06B6D4", gd: "#F59E0B", meeting: "#10B981", other: "#8B90A7" };
+const EVENT_LABEL = { drive: "Campus Drive", interview: "Interview", gd: "Group Discussion", meeting: "Meeting", other: "Other" };
+
+export default function RecruiterDashboard({ user, setActivePage }) {
   const navigate = useNavigate();
 
   const pipeline = [
@@ -63,6 +67,12 @@ export default function RecruiterDashboard({ user }) {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  function goToCalendar() {
+    if (typeof setActivePage === "function") {
+      setActivePage("calendartasks");
+    }
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -284,7 +294,10 @@ export default function RecruiterDashboard({ user }) {
     >
       <StarticleBackground />
 
-      <header className="dashboard-header">
+      <header
+        className="dashboard-header"
+        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}
+      >
         <div>
           <p className="dashboard-kicker">
             SAARTHI ANALYTICS
@@ -297,6 +310,28 @@ export default function RecruiterDashboard({ user }) {
             to joining.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={goToCalendar}
+          aria-label="Calendar & Tasks"
+          title="Calendar & Tasks"
+          style={{
+            background: "rgba(124,58,237,0.1)",
+            border: "none",
+            borderRadius: 12,
+            width: 44,
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            fontSize: 20,
+            flexShrink: 0,
+          }}
+        >
+          📅
+        </button>
       </header>
 
       {error && (

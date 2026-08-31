@@ -64,8 +64,6 @@ const pages = {
 };
 
 // Pages available to recruiter
-// FIX: campusdb, corpdb, pipeline, comm were missing — those sidebar
-// links were falling back to RecruiterDashboard.
 const recruiterPages = {
   recruiterDashboard: RecruiterDashboard,
   campusdb: CampusDB,
@@ -92,6 +90,7 @@ export default function App() {
   const [userRole, setUserRole] = useState(null);
   const [activePage, setActivePage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -140,6 +139,30 @@ export default function App() {
 
     checkApproval();
   }, [session]);
+
+  // Unread notification count — refreshes on session change and on
+  // every navigation (so it clears once the Notifications page is
+  // opened, since that page marks everything as read).
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      if (!session) {
+        setUnreadCount(0);
+        return;
+      }
+
+      const { count, error } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", session.user.id)
+        .eq("read", false);
+
+      if (!error) {
+        setUnreadCount(count || 0);
+      }
+    };
+
+    loadUnreadCount();
+  }, [session, activePage]);
 
   // Lock background scroll while the mobile sidebar drawer is open
   useEffect(() => {
@@ -288,6 +311,7 @@ export default function App() {
       joining: Joining,
       approvals: Approvals,
       documents: Documents,
+      notifications: Notifications,
     };
 
     let PageComponent;
@@ -345,6 +369,52 @@ export default function App() {
           </div>
           <div className="top-actions">
             <ThemeToggle />
+
+            <button
+              type="button"
+              onClick={() => handleSetActivePage("notifications")}
+              aria-label="Notifications"
+              style={{
+                position: "relative",
+                background: "rgba(124,58,237,0.08)",
+                border: "none",
+                borderRadius: 10,
+                width: 38,
+                height: 38,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: 18,
+              }}
+            >
+              🔔
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    right: 2,
+                    minWidth: 16,
+                    height: 16,
+                    padding: "0 3px",
+                    borderRadius: 999,
+                    background: "#ef4444",
+                    border: "2px solid #fff",
+                    color: "#fff",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    lineHeight: 1,
+                  }}
+                >
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
+
             <span className="pill">Talent Corner Workspace</span>
             <span>{session.user.email}</span>
             <span

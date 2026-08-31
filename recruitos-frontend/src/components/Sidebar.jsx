@@ -24,8 +24,6 @@ const NAV = {
     ]},
     { section: 'System', items: [
       { key: 'usermanagement', icon: '⚙', label: 'User Management' },
-      { key: 'notifications', icon: '🔔', label: 'Notifications' },
-      { key: 'calendartasks', icon: '📅', label: 'Calendar & Tasks' },
     ]},
   ],
 
@@ -45,10 +43,6 @@ const NAV = {
       { key: 'pipeline', icon: '→', label: 'Candidate Pipeline' },
       { key: 'comm', icon: '●', label: 'Communication CRM' },
       { key: 'reports', icon: '●', label: 'Reports & Analytics' },
-    ]},
-    { section: 'Tools', items: [
-      { key: 'notifications', icon: '🔔', label: 'Notifications' },
-      { key: 'calendartasks', icon: '📅', label: 'Calendar & Tasks' },
     ]},
   ],
 
@@ -82,9 +76,6 @@ corporate: [
       { key: 'interview', icon: '→', label: 'Interviews' },
       { key: 'offers', icon: '●', label: 'Offer Letters' },
       { key: 'joining', icon: '●', label: 'Joining Status' },
-    ]},
-    { section: 'Tools', items: [
-      { key: 'notifications', icon: '🔔', label: 'Notifications' },
     ]},
   ],
 };

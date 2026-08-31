@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
 import { getAptitudeResults, addAptitudeResult, getCandidatesByStage, getJobs, generateAptitudeTest, sendAptitudeInvite } from '../lib/api';
 
+const TOPIC_OPTIONS = ['Quantitative', 'Logical', 'Verbal', 'GK', 'Technical'];
+const DIFFICULTY_OPTIONS = ['easy', 'medium', 'hard'];
+
+const blankQuestion = () => ({
+  q: '',
+  options: ['', '', '', ''],
+  answer: '',
+  topic: 'Quantitative',
+  difficulty: 'medium',
+});
+
 export default function Aptitude() {
   const [results, setResults] = useState([]);
   const [candidates, setCandidates] = useState([]);
@@ -108,10 +119,82 @@ export default function Aptitude() {
     }
   }
 
+  // ---- Manual question editing ----
+
+  function updateQuestions(updater) {
+    setGeneratedTest((prev) => {
+      if (!prev) return prev;
+      const questions = updater(prev.questions);
+      return { ...prev, questions, total: questions.length };
+    });
+    setForm((f) => ({ ...f, total: String(updater([...(generatedTest?.questions || [])]).length) }));
+  }
+
+  function updateQuestionField(index, field, value) {
+    setGeneratedTest((prev) => {
+      if (!prev) return prev;
+      const questions = prev.questions.map((q, i) => (i === index ? { ...q, [field]: value } : q));
+      return { ...prev, questions };
+    });
+  }
+
+  function updateOption(index, optIndex, value) {
+    setGeneratedTest((prev) => {
+      if (!prev) return prev;
+      const questions = prev.questions.map((q, i) => {
+        if (i !== index) return q;
+        const oldValue = q.options[optIndex];
+        const options = q.options.map((o, oi) => (oi === optIndex ? value : o));
+        // If the edited option was the correct answer, keep the answer in sync
+        const answer = q.answer === oldValue ? value : q.answer;
+        return { ...q, options, answer };
+      });
+      return { ...prev, questions };
+    });
+  }
+
+  function setCorrectAnswer(index, optionValue) {
+    setGeneratedTest((prev) => {
+      if (!prev) return prev;
+      const questions = prev.questions.map((q, i) => (i === index ? { ...q, answer: optionValue } : q));
+      return { ...prev, questions };
+    });
+  }
+
+  function deleteQuestion(index) {
+    if (!window.confirm('Remove this question from the test?')) return;
+    setGeneratedTest((prev) => {
+      if (!prev) return prev;
+      const questions = prev.questions.filter((_, i) => i !== index);
+      return { ...prev, questions, total: questions.length };
+    });
+    setForm((f) => ({ ...f, total: String((generatedTest?.questions.length || 1) - 1) }));
+  }
+
+  function addManualQuestion() {
+    setGeneratedTest((prev) => {
+      const base = prev || { questions: [], difficulty: genDifficulty === 'auto' ? 'medium' : genDifficulty };
+      const questions = [...base.questions, blankQuestion()];
+      return { ...base, questions, total: questions.length };
+    });
+    setForm((f) => ({ ...f, total: String(((generatedTest?.questions?.length) || 0) + 1) }));
+  }
+
   async function handleSendInvite() {
     if (!sendCandidateId || !generatedTest) return;
     setSendError('');
     setSendSuccess('');
+
+    // Validate every question has text, 4 non-empty options, and a correct answer that matches one of them
+    const invalidIndex = generatedTest.questions.findIndex((q) => {
+      const filledOptions = q.options.filter((o) => o.trim() !== '');
+      return !q.q.trim() || filledOptions.length < 2 || !q.options.includes(q.answer) || !q.answer;
+    });
+    if (invalidIndex !== -1) {
+      setSendError(`Question ${invalidIndex + 1} is incomplete — check the question text, options, and correct answer.`);
+      return;
+    }
+
     setSendingInvite(true);
     try {
       await sendAptitudeInvite({
@@ -183,9 +266,18 @@ export default function Aptitude() {
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               {genError && <p style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{genError}</p>}
-              <button className="btn-primary" type="submit" disabled={generating}>
-                {generating ? 'Generating…' : 'Generate Test'}
-              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn-primary" type="submit" disabled={generating}>
+                  {generating ? 'Generating…' : 'Generate Test'}
+                </button>
+                <button
+                  className="btn-outline"
+                  type="button"
+                  onClick={addManualQuestion}
+                >
+                  + Start Blank / Add Question Manually
+                </button>
+              </div>
             </div>
           </form>
 
@@ -194,6 +286,10 @@ export default function Aptitude() {
               <div className="panel-title" style={{ fontSize: 14 }}>
                 Preview — {generatedTest.questions.length} questions ({generatedTest.difficulty} level)
               </div>
+              <p className="panel-sub" style={{ marginTop: -4 }}>
+                Edit any question, option, or the correct answer below before sending.
+              </p>
+
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12, marginBottom: 10, flexWrap: 'wrap' }}>
                 <select value={sendCandidateId} onChange={(e) => setSendCandidateId(e.target.value)} style={{ minWidth: 200 }}>
                   <option value="">Select candidate to email…</option>
@@ -211,23 +307,99 @@ export default function Aptitude() {
               </div>
               {sendError && <p style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{sendError}</p>}
               {sendSuccess && <p style={{ color: 'var(--success)', fontSize: 12.5, marginBottom: 8 }}>{sendSuccess}</p>}
-              <div style={{ maxHeight: 380, overflowY: 'auto', marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+              <div style={{ maxHeight: 460, overflowY: 'auto', marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {generatedTest.questions.map((q, i) => (
-                  <div key={i} style={{ padding: '12px 14px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)' }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{i + 1}. {q.q}</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                  <div key={i} style={{ padding: '14px 16px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, paddingTop: 8, flexShrink: 0 }}>{i + 1}.</div>
+                      <textarea
+                        value={q.q}
+                        onChange={(e) => updateQuestionField(i, 'q', e.target.value)}
+                        placeholder="Question text..."
+                        rows={2}
+                        style={{
+                          flex: 1,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          padding: '8px 10px',
+                          borderRadius: 6,
+                          border: '1px solid var(--border-default)',
+                          resize: 'vertical',
+                          fontFamily: 'inherit',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => deleteQuestion(i)}
+                        title="Remove question"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 16, padding: 4, flexShrink: 0 }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginLeft: 24 }}>
                       {q.options.map((opt, oi) => (
-                        <div key={oi} style={{ color: opt === q.answer ? 'var(--success)' : 'var(--text-secondary)', fontWeight: opt === q.answer ? 700 : 400 }}>
-                          {String.fromCharCode(65 + oi)}. {opt} {opt === q.answer ? '✓' : ''}
+                        <div key={oi} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            type="radio"
+                            name={`correct-${i}`}
+                            checked={opt !== '' && opt === q.answer}
+                            onChange={() => setCorrectAnswer(i, opt)}
+                            title="Mark as correct answer"
+                            style={{ flexShrink: 0, cursor: 'pointer' }}
+                          />
+                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flexShrink: 0 }}>
+                            {String.fromCharCode(65 + oi)}.
+                          </span>
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => updateOption(i, oi, e.target.value)}
+                            placeholder={`Option ${String.fromCharCode(65 + oi)}`}
+                            style={{
+                              flex: 1,
+                              fontSize: 12.5,
+                              padding: '6px 8px',
+                              borderRadius: 6,
+                              border: '1px solid var(--border-default)',
+                              fontWeight: opt !== '' && opt === q.answer ? 700 : 400,
+                              color: opt !== '' && opt === q.answer ? 'var(--success)' : 'inherit',
+                            }}
+                          />
                         </div>
                       ))}
                     </div>
-                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
-                      Topic: {q.topic} · Difficulty: {q.difficulty}
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 10, marginLeft: 24 }}>
+                      <select
+                        value={q.topic}
+                        onChange={(e) => updateQuestionField(i, 'topic', e.target.value)}
+                        style={{ fontSize: 11, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border-default)' }}
+                      >
+                        {TOPIC_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <select
+                        value={q.difficulty}
+                        onChange={(e) => updateQuestionField(i, 'difficulty', e.target.value)}
+                        style={{ fontSize: 11, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border-default)' }}
+                      >
+                        {DIFFICULTY_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+                      </select>
                     </div>
                   </div>
                 ))}
               </div>
+
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={addManualQuestion}
+                style={{ marginTop: 12 }}
+              >
+                + Add Another Question
+              </button>
             </div>
           )}
         </div>
