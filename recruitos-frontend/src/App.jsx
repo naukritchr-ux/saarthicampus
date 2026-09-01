@@ -131,10 +131,16 @@ export default function App() {
       setProfileApproved(data?.approved === true);
       setUserRole(data?.role || "user");
 
-      if (data?.role === "corporate") setActivePage("corporateDashboard");
-      else if (data?.role === "admin") setActivePage("adminDashboard");
-      else if (data?.role === "recruiter") setActivePage("recruiterDashboard");
-      else setActivePage("dashboard");
+      let initialPage = "dashboard";
+      if (data?.role === "corporate") initialPage = "corporateDashboard";
+      else if (data?.role === "admin") initialPage = "adminDashboard";
+      else if (data?.role === "recruiter") initialPage = "recruiterDashboard";
+
+      // Use replaceState (not pushState) here since this is the initial
+      // landing page for the session, not a user-driven navigation —
+      // we don't want a "back" press to just re-land on the same page.
+      window.history.replaceState({ activePage: initialPage }, "");
+      setActivePage(initialPage);
     };
 
     checkApproval();
@@ -163,6 +169,20 @@ export default function App() {
 
     loadUnreadCount();
   }, [session, activePage]);
+
+  // Keep `activePage` in sync with the browser's back/forward buttons.
+  // Every call to handleSetActivePage() below pushes a history entry,
+  // so pressing back/forward fires this popstate handler and restores
+  // whichever page was active at that point in history.
+  useEffect(() => {
+    function handlePopState(e) {
+      if (e.state?.activePage) {
+        setActivePage(e.state.activePage);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // Lock background scroll while the mobile sidebar drawer is open
   useEffect(() => {
@@ -333,7 +353,11 @@ export default function App() {
       PageComponent = pages[activePage] || Dashboard;
     }
 
+    // Every user-driven navigation pushes a new history entry so the
+    // browser's back/forward buttons move between previously visited
+    // pages within the app (see the popstate handler above).
     function handleSetActivePage(page) {
+      window.history.pushState({ activePage: page }, "");
       setActivePage(page);
       setSidebarOpen(false);
     }

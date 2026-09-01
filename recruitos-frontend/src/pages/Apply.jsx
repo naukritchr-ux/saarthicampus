@@ -20,6 +20,8 @@ export default function Apply() {
   const [colleges, setColleges] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [candidateId, setCandidateId] = useState(null);
+  const [pendingResumeUrl, setPendingResumeUrl] = useState(null);
+  const [pendingPhotoUrl, setPendingPhotoUrl] = useState(null);
   const [resumeText, setResumeText] = useState('');
   const [resumeExtractFailed, setResumeExtractFailed] = useState(false);
   const [appliedJobIds, setAppliedJobIds] = useState([]);
@@ -100,17 +102,20 @@ export default function Apply() {
     if (form.phone && form.phone.length !== 10) { setError('Phone number must be exactly 10 digits.'); return; }
     setLoading(true);
     try {
+      // NOTE: The candidate record is deliberately NOT created here.
+      // We only upload the resume/photo and extract resume text (needed
+      // for job match scoring on the next screen). The candidate is only
+      // saved to the database once they actually apply to a job — see
+      // handleApply below. This avoids saving "ghost" candidates who fill
+      // in the form but never complete an application.
       let photo_url = null;
       if (photo) {
         photo_url = await uploadPhoto(photo);
       }
 
       const resume_url = await uploadResume(file);
-      const skillsArray = form.skills
-        ? form.skills.split(',').map((s) => s.trim()).filter(Boolean)
-        : [];
-      const candidate = await createCandidate({ ...form, skills: skillsArray, resume_url, photo_url });
-      setCandidateId(candidate.id);
+      setPendingResumeUrl(resume_url);
+      setPendingPhotoUrl(photo_url);
 
       try {
         const text = await extractPdfText(file);
@@ -131,7 +136,25 @@ export default function Apply() {
   async function handleApply(job) {
     setApplyingJobId(job.id);
     try {
-      const application = await applyToJob({ candidate_id: candidateId, job_id: job.id });
+      let currentCandidateId = candidateId;
+
+      // Create the candidate record only on the first successful apply.
+      // Subsequent applies (to other jobs) reuse the same candidateId.
+      if (!currentCandidateId) {
+        const skillsArray = form.skills
+          ? form.skills.split(',').map((s) => s.trim()).filter(Boolean)
+          : [];
+        const candidate = await createCandidate({
+          ...form,
+          skills: skillsArray,
+          resume_url: pendingResumeUrl,
+          photo_url: pendingPhotoUrl,
+        });
+        currentCandidateId = candidate.id;
+        setCandidateId(currentCandidateId);
+      }
+
+      const application = await applyToJob({ candidate_id: currentCandidateId, job_id: job.id });
       setAppliedJobIds((prev) => [...prev, job.id]);
 
       if (resumeText) {
