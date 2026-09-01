@@ -61,9 +61,9 @@ corporate: [
     { key: 'approvals', icon: '✓', label: 'Approvals' },
     { key: 'documents', icon: '📄', label: 'Documents' },
   ]},
-  { section: 'Analytics', items: [                                  // ⭐ NEW
-    { key: 'hiringAnalytics', icon: '📊', label: 'Hiring Analytics' }, // ⭐ NEW
-  ]},                                                                  // ⭐ NEW
+  { section: 'Analytics', items: [                                  
+    { key: 'hiringAnalytics', icon: '📊', label: 'Reports & Analytics' }, 
+  ]},                                                                
 ],
 
   candidate: [

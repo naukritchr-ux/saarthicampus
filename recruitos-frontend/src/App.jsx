@@ -36,6 +36,8 @@ import RecruiterDashboard from "./pages/RecruiterDashboard";
 import CompanyProfile from "./pages/CompanyProfile";
 import CandidateSearch from "./pages/CandidateSearch";
 import HiringAnalytics from "./pages/HiringAnalytics";
+import RecruiterReports from "./pages/RecruiterReports";
+import CorporateReports from "./pages/CorporateReports";
 
 // Pages available to admin
 const pages = {
@@ -78,7 +80,7 @@ const recruiterPages = {
   pipeline: Pipeline,
   candidatedb: CandidateDB,
   comm: Comm,
-  reports: Reports,
+  reports: Reports,          // ← ye line
   notifications: Notifications,
   calendartasks: CalendarTasks,
 };
@@ -318,12 +320,14 @@ export default function App() {
     }
 
     // Corporate-only pages
+  
+    // Corporate-only pages
     const corporatePages = {
       corporateDashboard: CorporateDashboard,
       companyProfile: CompanyProfile,
       jobs: Jobs,
       candidateSearch: CandidateSearch,
-      hiringAnalytics: HiringAnalytics,
+      hiringAnalytics: CorporateReports, 
       pipeline: Pipeline,
       resume: Resume,
       interview: Interview,

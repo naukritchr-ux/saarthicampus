@@ -1,0 +1,382 @@
+/* ===========================================================
+   REPORTS & ANALYTICS — NEW LIST + DETAIL LAYOUT
+=========================================================== */
+
+.rp-breadcrumb {
+  font-size: 12px;
+  color: var(--text-muted, var(--dash-muted, #999));
+  margin-bottom: 10px;
+}
+
+.rp-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.rp-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rp-page-title h1 {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #7C3AED, #06B6D4);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.rp-page-icon {
+  font-size: 22px;
+}
+
+.rp-page-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.rp-page-actions .btn-outline {
+  border-radius: 10px;
+  font-weight: 600;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.rp-page-actions .btn-outline:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.14);
+}
+
+.rp-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .rp-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------- SHARED CARD LOOK ------------------- */
+
+.rp-sidebar,
+.rp-stat-card,
+.rp-panel-card {
+  background: var(--card-bg, var(--dash-surface, #fff));
+  border: 1px solid var(--border-default, var(--dash-border, #eee));
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.rp-stat-card:hover,
+.rp-panel-card:hover {
+  box-shadow: 0 4px 16px rgba(16, 24, 40, 0.06);
+}
+
+/* ------------------- LEFT SIDEBAR (REPORT LIST) ------------------- */
+
+.rp-sidebar {
+  padding: 16px;
+  position: sticky;
+  top: 16px;
+}
+
+.rp-sidebar-head {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-default, var(--dash-border, #f0f0f0));
+}
+
+.rp-sidebar-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.rp-sidebar-sub {
+  font-size: 12px;
+  color: var(--text-muted, var(--dash-muted, #999));
+  margin-top: 2px;
+}
+
+.rp-report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 640px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.rp-report-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.rp-report-list::-webkit-scrollbar-thumb {
+  background: rgba(124, 58, 237, 0.2);
+  border-radius: 10px;
+}
+
+.rp-report-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.rp-report-item:hover {
+  background: rgba(124, 58, 237, 0.06);
+  transform: translateX(1px);
+}
+
+.rp-report-item.active {
+  background: rgba(124, 58, 237, 0.1);
+  border-color: rgba(124, 58, 237, 0.35);
+  box-shadow: inset 2px 0 0 #7C3AED;
+}
+
+.rp-report-icon {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.rp-report-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main, var(--dash-text, #222));
+}
+
+.rp-report-item.active .rp-report-title {
+  color: #7C3AED;
+}
+
+.rp-report-desc {
+  font-size: 11.5px;
+  color: var(--text-muted, var(--dash-muted, #999));
+  margin-top: 2px;
+}
+
+/* ------------------- MIDDLE DETAIL PANEL ------------------- */
+
+.rp-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.rp-detail-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-default, var(--dash-border, #eee));
+}
+
+.rp-detail-head h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.rp-detail-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted, var(--dash-muted, #999));
+}
+
+.rp-stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.rp-stat-card {
+  padding: 16px;
+}
+
+.rp-stat-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+.rp-stat-label {
+  font-size: 12px;
+  color: var(--text-muted, var(--dash-muted, #999));
+  margin-bottom: 4px;
+}
+
+.rp-stat-value {
+  font-size: 23px;
+  font-weight: 800;
+  color: var(--text-main, var(--dash-text, #111));
+  line-height: 1.2;
+}
+
+.rp-stat-sub {
+  font-size: 11px;
+  color: var(--text-muted, var(--dash-muted, #aaa));
+  margin-top: 4px;
+}
+
+.rp-panel-card {
+  padding: 18px;
+}
+
+.rp-panel-card-head {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rp-panel-card-head h3 {
+  margin: 0 0 3px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.rp-panel-card-head p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted, var(--dash-muted, #999));
+}
+
+.rp-table-wrap {
+  overflow-x: auto;
+}
+
+.rp-table-wrap table th {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, var(--dash-muted, #999));
+  font-weight: 700;
+}
+
+.rp-table-wrap table tbody tr:hover {
+  background: rgba(124, 58, 237, 0.04);
+}
+
+.rp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 44px 12px;
+  color: var(--text-muted, var(--dash-muted, #999));
+  font-size: 13px;
+}
+
+.rp-empty::before {
+  content: "📭";
+  font-size: 26px;
+  opacity: 0.6;
+}
+
+/* ------------------- RIGHT SIDEBAR (INSIGHTS + FILTERS) ------------------- */
+
+.rp-right {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: sticky;
+  top: 16px;
+}
+
+.rp-insights-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rp-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.05), rgba(6, 182, 212, 0.04));
+}
+
+.rp-insight-icon {
+  font-size: 16px;
+}
+
+.rp-insight-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #7C3AED;
+}
+
+.rp-insight-detail {
+  font-size: 11.5px;
+  color: var(--text-muted, var(--dash-muted, #666));
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.rp-insights-empty {
+  text-align: center;
+  padding: 20px 8px;
+  font-size: 12px;
+  color: var(--text-muted, var(--dash-muted, #999));
+}
+
+.rp-filter-field {
+  margin-bottom: 14px;
+}
+
+.rp-filter-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, var(--dash-muted, #999));
+  margin-bottom: 5px;
+}
+
+.rp-filter-field select {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default, var(--dash-border, #e5e5e5));
+  font-size: 13px;
+  background: var(--card-bg, var(--dash-surface, #fff));
+  color: var(--text-main, var(--dash-text, #222));
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.rp-filter-field select:focus {
+  outline: none;
+  border-color: #7C3AED;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+}
+
+.rp-apply-filters {
+  width: 100%;
+  margin-top: 4px;
+  border-radius: 10px;
+  font-weight: 700;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.rp-apply-filters:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.25);
+}
