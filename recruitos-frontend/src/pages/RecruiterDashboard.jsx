@@ -45,15 +45,6 @@ const EVENT_LABEL = { drive: "Campus Drive", interview: "Interview", gd: "Group 
 export default function RecruiterDashboard({ user, setActivePage }) {
   const navigate = useNavigate();
 
-  const pipeline = [
-    { label: "JD", route: "/app/jobs" },
-    { label: "Resumes", route: "/app/resume" },
-    { label: "Assessments", route: "/app/aptitude" },
-    { label: "Interview", route: "/app/interview" },
-    { label: "Selection", route: "/app/offers" },
-    { label: "Joining", route: "/app/joining" },
-  ];
-
   const [stats, setStats] = useState({
     myJobs: 0,
     resumes: 0,
@@ -365,35 +356,6 @@ export default function RecruiterDashboard({ user, setActivePage }) {
           tone="green"
         />
       </div>
-
-      <section className="dashboard-panel pipeline-panel">
-        <div className="dashboard-panel-title">
-          My Recruitment Pipeline
-        </div>
-
-        <div className="dashboard-panel-subtitle">
-          JD → Resumes → Assessments → Interviews →
-          Selection → Joining
-        </div>
-
-        <div className="pipeline-track">
-          {pipeline.map((stage, index) => (
-            <button
-              type="button"
-              className="pipeline-step"
-              key={stage.label}
-              onClick={() => navigate(stage.route)}
-              aria-label={`Open ${stage.label}`}
-            >
-              <span>
-                {String(index + 1).padStart(2, "0")}
-              </span>
-
-              <strong>{stage.label}</strong>
-            </button>
-          ))}
-        </div>
-      </section>
 
       <section className="dashboard-chart-card growth-card">
         <div className="chart-heading">
