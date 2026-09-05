@@ -23,7 +23,11 @@ const { moveApplicationStage } = require("./pipelineSync");
 const { getRequestProfile } = require("./authHelpers");
 const multer = require("multer");
 const XLSX = require("xlsx");
-const pdfParse = require("pdf-parse");
+// NOTE: pdf-parse is now lazy-loaded (required inside the routes that need it)
+// instead of at the top of the file. Loading it eagerly crashes on Vercel's
+// serverless runtime because pdf-parse tries to reference DOMMatrix (a
+// browser-only API) at module-load time, which doesn't exist in Node.js.
+// That crash was taking down the entire app, including unrelated routes.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -1299,6 +1303,7 @@ app.post("/api/import/campus", upload.single("file"), async (req, res) => {
     const ext = req.file.originalname.split(".").pop().toLowerCase();
 
     if (ext === "pdf") {
+      const pdfParse = require("pdf-parse");
       const pdfData = await pdfParse(req.file.buffer);
       rawText = pdfData.text;
     } else {
@@ -1393,6 +1398,7 @@ app.post("/api/import/corporate", upload.single("file"), async (req, res) => {
     const ext = req.file.originalname.split(".").pop().toLowerCase();
 
     if (ext === "pdf") {
+      const pdfParse = require("pdf-parse");
       const pdfData = await pdfParse(req.file.buffer);
       rawText = pdfData.text;
     } else {
