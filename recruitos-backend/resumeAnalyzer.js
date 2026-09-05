@@ -1,5 +1,4 @@
 const Groq = require('groq-sdk');
-const pdfParse = require('pdf-parse');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
@@ -9,6 +8,11 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 async function analyzeResume(resumeUrl, jobSkills, applicationId) {
   try {
     console.log(`🔍 Starting analysis for application ${applicationId}`);
+
+    // pdf-parse is lazy-loaded here (not at the top of the file) because
+    // requiring it eagerly crashes on Vercel's serverless runtime — it
+    // references DOMMatrix (a browser-only API) at module-load time.
+    const pdfParse = require('pdf-parse');
 
     const response = await fetch(resumeUrl);
     const buffer = await response.arrayBuffer();
