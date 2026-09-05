@@ -9,9 +9,6 @@ async function analyzeResume(resumeUrl, jobSkills, applicationId) {
   try {
     console.log(`🔍 Starting analysis for application ${applicationId}`);
 
-    // pdf-parse is lazy-loaded here (not at the top of the file) because
-    // requiring it eagerly crashes on Vercel's serverless runtime — it
-    // references DOMMatrix (a browser-only API) at module-load time.
     const pdfParse = require('pdf-parse');
 
     const response = await fetch(resumeUrl);
