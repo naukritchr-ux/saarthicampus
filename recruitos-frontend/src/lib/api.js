@@ -1,8 +1,8 @@
 import { supabase } from './supabaseClient';
-async function authHeaders() {
+export async function authHeaders() {
   const { data } = await supabase.auth.getSession();
-  const userId = data.session?.user?.id;
-  return userId ? { 'x-user-id': userId } : {};
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 
@@ -111,6 +111,13 @@ export async function getJobs() {
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/jobs`, { headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to load jobs');
+  return data;
+}
+
+export async function getPublicJobs() {
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/jobs/public`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load open positions');
   return data;
 }
 
@@ -573,9 +580,10 @@ export async function getCompanyNames() {
 }
 
 export async function generateAptitudeTest({ job_id, difficulty, question_count }) {
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/aptitude/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ job_id, difficulty, question_count }),
   });
   const data = await res.json();
@@ -584,9 +592,10 @@ export async function generateAptitudeTest({ job_id, difficulty, question_count 
 }
 
 export async function sendAptitudeInvite({ candidate_id, job_id, questions, difficulty }) {
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/aptitude/send-invite`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ candidate_id, job_id, questions, difficulty }),
   });
   const data = await res.json();
@@ -613,9 +622,10 @@ export async function submitAptitudeTest(token, answers) {
 }
 
 export async function generateJD({ prompt, company }) {
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/jd/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ prompt, company }),
   });
   const data = await res.json();
@@ -624,9 +634,10 @@ export async function generateJD({ prompt, company }) {
 }
 
 export async function addManualGDResult(data) {
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/gd/manual`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(data),
   });
   const result = await res.json();
@@ -644,9 +655,10 @@ export async function getCandidatesInEmailPhase(phase) {
 }
 
 export async function logCall(data) {
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/calls`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(data),
   });
   const result = await res.json();
@@ -655,7 +667,8 @@ export async function logCall(data) {
 }
 
 export async function getRecruiterPerformance() {
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/calls/performance`);
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/calls/performance`, { headers });
   if (!res.ok) throw new Error('Failed to load recruiter performance');
   return res.json();
 }

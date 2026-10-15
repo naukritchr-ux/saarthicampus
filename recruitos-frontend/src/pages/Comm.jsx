@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { getCommunications, addCommunication, getColleges, getCompanies } from '../lib/api';
+import { getCommunications, addCommunication, getColleges, getCompanies, authHeaders } from '../lib/api';
 
 async function generateEmailNote({ entityType, entityName, hint }) {
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/generate-email`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ entityType, entityName, hint }),
   });
   if (!res.ok) {

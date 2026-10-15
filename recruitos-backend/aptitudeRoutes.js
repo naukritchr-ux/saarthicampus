@@ -3,14 +3,19 @@ const Groq = require('groq-sdk');
 const { createClient } = require('@supabase/supabase-js');
 const { sendAIInterviewInviteEmail } = require('./emailService');
 const { moveApplicationStage } = require('./pipelineSync');
+const { createAuthMiddleware } = require('./authHelpers');
 
 const router = express.Router();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
+const { requireStaff } = createAuthMiddleware(supabase);
 
 const MODEL = 'openai/gpt-oss-120b';
 
-router.post('/generate', async (req, res) => {
+router.post('/generate', requireStaff, async (req, res) => {
   try {
     const { job_id, difficulty, question_count } = req.body;
     const count = Math.min(Math.max(Number(question_count) || 20, 5), 50);
@@ -82,8 +87,8 @@ Respond with ONLY valid JSON, no markdown, no code fences, no explanation, in ex
   }
 });
 
-// Save a generated test + email the link to a candidate
-router.post('/send-invite', async (req, res) => {
+// Save a generated test + email the link to a candidate (staff only)
+router.post('/send-invite', requireStaff, async (req, res) => {
   try {
     const { candidate_id, job_id, questions, difficulty } = req.body;
     if (!candidate_id || !questions) {

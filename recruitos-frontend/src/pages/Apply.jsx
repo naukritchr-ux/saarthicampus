@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { getJobs, getColleges, uploadResume, uploadPhoto, createCandidate, applyToJob, updateApplicationScore, computeMatchScore } from '../lib/api';
+import { getPublicJobs, getColleges, uploadResume, uploadPhoto, createCandidate, applyToJob, updateApplicationScore, computeMatchScore } from '../lib/api';
 import { extractPdfText, scoreResume } from '../lib/resumeScoring';
 import CollegeAutocomplete from './CollegeAutocomplete';
 import { sanitizePhone } from '../lib/phone';
@@ -48,7 +48,7 @@ export default function Apply() {
 
   useEffect(() => {
     getColleges().then(setColleges).catch(() => {});
-    getJobs().then(setJobs).catch(() => {});
+    getPublicJobs().then(setJobs).catch(() => {});
   }, []);
 
   const locationOptions = useMemo(

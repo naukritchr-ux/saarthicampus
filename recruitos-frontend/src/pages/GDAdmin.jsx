@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { getCandidatesByStage } from "../lib/api";
+import { getCandidatesByStage, authHeaders } from "../lib/api";
 
 const RATING_CRITERIA = [
   { key: "confidence", label: "Confidence" },
@@ -56,8 +56,10 @@ export default function GDAdmin() {
   }, []);
 
   const fetchSessionData = async (sessionId) => {
+    const headers = await authHeaders();
     const res = await fetch(
       `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}`,
+      { headers },
     );
     const data = await res.json();
     setSessionData(data);
@@ -76,11 +78,12 @@ export default function GDAdmin() {
         return;
       }
       setCreating(true);
+      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
       const res = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/api/gd/create`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             topic: form.topic,
             duration_minutes: form.duration_minutes,
@@ -98,11 +101,12 @@ export default function GDAdmin() {
       setCreating(false);
     } else {
       setCreating(true);
+      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
       const res = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/api/gd/create-offline`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             topic: form.topic,
             candidates: selectedCandidates,
@@ -124,9 +128,10 @@ export default function GDAdmin() {
   };
 
   const handleStart = async (sessionId) => {
+    const headers = await authHeaders();
     await fetch(
       `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/start`,
-      { method: "POST" },
+      { method: "POST", headers },
     );
     await fetchSessions();
     setActiveSession(sessionId);
@@ -134,8 +139,10 @@ export default function GDAdmin() {
   };
 
   const handleEnd = async (sessionId) => {
+    const headers = await authHeaders();
     await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/end`, {
       method: "POST",
+      headers,
     });
     alert(
       "GD ended! AI is scoring all participants. Check back in 30 seconds.",
@@ -145,11 +152,12 @@ export default function GDAdmin() {
   };
 
   const handleShortlist = async (sessionId, participantIds) => {
+    const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
     await fetch(
       `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/shortlist`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ participantIds }),
       },
     );
@@ -205,11 +213,12 @@ export default function GDAdmin() {
     const draft = getOrInitDraft(p);
     setSavingRatingId(p.id);
     try {
+      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
       const res = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/api/gd/participant/${p.id}/manual-rating`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify(draft),
         },
       );

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { authHeaders } from '../lib/api';
 
 export default function TalentPassport({ candidateId, onClose }) {
   const [data, setData] = useState(null);
@@ -9,7 +10,8 @@ export default function TalentPassport({ candidateId, onClose }) {
     let ignore = false;
     async function load() {
       try {
-        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/candidate/${candidateId}/passport`);
+        const headers = await authHeaders();
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/candidate/${candidateId}/passport`, { headers });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Failed to load passport');
         if (!ignore) setData(json);

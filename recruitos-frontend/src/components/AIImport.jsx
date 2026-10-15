@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { authHeaders } from '../lib/api';
 
 export default function AIImport({ type, onImported }) {
   const [dragging, setDragging] = useState(false);
@@ -33,8 +34,10 @@ export default function AIImport({ type, onImported }) {
       const formData = new FormData();
       formData.append('file', f);
 
+      const headers = await authHeaders();
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/import/${type}`, {
         method: 'POST',
+        headers,
         body: formData,
       });
 
@@ -65,9 +68,10 @@ export default function AIImport({ type, onImported }) {
         ? { colleges: preview }
         : { companies: preview };
 
+      const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/import/${type}/save`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       });
 

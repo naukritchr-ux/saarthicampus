@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getInterviews, addInterview, getAllApplications } from '../lib/api';
+import { getInterviews, addInterview, getAllApplications, authHeaders } from '../lib/api';
 
 export default function Interview() {
   const [interviews, setInterviews] = useState([]);
@@ -81,9 +81,10 @@ export default function Interview() {
     if (!candId || !jobId) return;
     setSendingId(app.id);
     try {
+      const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/ai-interview/send-invite`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ candidate_id: candId, job_id: jobId }),
       });
       const data = await res.json();

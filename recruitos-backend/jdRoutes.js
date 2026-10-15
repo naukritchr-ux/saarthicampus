@@ -1,10 +1,17 @@
 const express = require('express');
 const Groq = require('groq-sdk');
+const { createClient } = require('@supabase/supabase-js');
+const { createAuthMiddleware } = require('./authHelpers');
 
 const router = express.Router();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
+const { requireRole } = createAuthMiddleware(supabase);
 
-router.post('/generate', async (req, res) => {
+router.post('/generate', requireRole('admin', 'recruiter', 'corporate'), async (req, res) => {
   try {
     const { prompt, company } = req.body;
     if (!prompt) return res.status(400).json({ error: 'prompt is required' });

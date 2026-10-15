@@ -2,10 +2,15 @@ const express = require('express');
 const Groq = require('groq-sdk');
 const { createClient } = require('@supabase/supabase-js');
 const { sendAIInterviewInviteEmail } = require('./emailService');
+const { createAuthMiddleware } = require('./authHelpers');
 
 const router = express.Router();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
+const { requireStaff } = createAuthMiddleware(supabase);
 
 const MODEL = 'llama-3.3-70b-versatile';
 const TOTAL_QUESTIONS = 5;
@@ -18,8 +23,8 @@ Required Qualification: ${job.qualification || 'N/A'}
 Key Skills: ${Array.isArray(job.skills) ? job.skills.join(', ') : job.skills || 'N/A'}`;
 }
 
-// Send the AI interview link to the candidate's email
-router.post('/send-invite', async (req, res) => {
+// Send the AI interview link to the candidate's email (staff only)
+router.post('/send-invite', requireStaff, async (req, res) => {
   try {
     const { candidate_id, job_id } = req.body;
     if (!candidate_id || !job_id) {
@@ -28,13 +33,14 @@ router.post('/send-invite', async (req, res) => {
 
     const { data: candidate, error: candErr } = await supabase
       .from('candidates').select('name, email').eq('id', candidate_id).single();
-    if (candErr) throw candErr;
+    if (candErr || !candidate) throw candErr || new Error('Candidate not found');
 
     const { data: job, error: jobErr } = await supabase
       .from('job_profiles').select('title, company').eq('id', job_id).single();
-    if (jobErr) throw jobErr;
+    if (jobErr || !job) throw jobErr || new Error('Job not found');
 
-    const interviewLink = `${req.headers.origin || 'http://localhost:5173'}/interview/${candidate_id}/${job_id}`;
+    const baseUrl = process.env.FRONTEND_URL || req.headers.origin || 'http://localhost:5173';
+    const interviewLink = `${baseUrl}/interview/${candidate_id}/${job_id}`;
 
     await sendAIInterviewInviteEmail({
       studentName: candidate.name,
@@ -70,7 +76,7 @@ Respond with ONLY valid JSON, no markdown, no code fences, no explanation, in ex
 {"score": <integer 0-100>, "matched_skills": [<strings>], "missing_skills": [<strings>]}`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
     });
@@ -99,11 +105,27 @@ router.post('/start', async (req, res) => {
 
     const { data: candidate, error: candErr } = await supabase
       .from('candidates').select('name').eq('id', candidate_id).single();
-    if (candErr) throw candErr;
+    if (candErr || !candidate) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
 
     const { data: job, error: jobErr } = await supabase
       .from('job_profiles').select('*').eq('id', job_id).single();
-    if (jobErr) throw jobErr;
+    if (jobErr || !job) {
+      return res.status(404).json({ error: 'Job profile not found' });
+    }
+
+    // Verify candidate and job match an existing application
+    const { data: app, error: appErr } = await supabase
+      .from('applications')
+      .select('id, stage')
+      .eq('candidate_id', candidate_id)
+      .eq('job_id', job_id)
+      .maybeSingle();
+
+    if (appErr || !app) {
+      return res.status(403).json({ error: 'No active application found for this candidate and job' });
+    }
 
     const jobContext = buildJobContext(job);
 
@@ -249,34 +271,3 @@ Respond with ONLY valid JSON, no other text, in exactly this shape:
 });
 
 module.exports = router;
-router.post('/send-invite', async (req, res) => {
-  try {
-    const { candidate_id, job_id } = req.body;
-    if (!candidate_id || !job_id) {
-      return res.status(400).json({ error: 'candidate_id and job_id are required' });
-    }
-
-    const { data: candidate, error: candErr } = await supabase
-      .from('candidates').select('name, email').eq('id', candidate_id).single();
-    if (candErr) throw candErr;
-
-    const { data: job, error: jobErr } = await supabase
-      .from('job_profiles').select('title, company').eq('id', job_id).single();
-    if (jobErr) throw jobErr;
-
-    const interviewLink = `${process.env.FRONTEND_URL}/interview/${candidate_id}/${job_id}`;
-
-    await sendAIInterviewInviteEmail({
-      studentName: candidate.name,
-      studentEmail: candidate.email,
-      jobTitle: job.title,
-      company: job.company,
-      interviewLink,
-    });
-
-    res.json({ success: true, message: 'Interview invite email sent.' });
-  } catch (err) {
-    console.error('Send interview invite error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});

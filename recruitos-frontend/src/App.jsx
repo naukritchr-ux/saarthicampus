@@ -90,7 +90,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [profileApproved, setProfileApproved] = useState(null);
   const [userRole, setUserRole] = useState(null);
-  const [activePage, setActivePage] = useState("dashboard");
+  const [activePage, setActivePage] = useState(() => {
+    return (
+      window.history.state?.activePage ||
+      localStorage.getItem("recruitos_active_page") ||
+      "dashboard"
+    );
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -109,9 +115,11 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const userId = session?.user?.id;
+
   useEffect(() => {
     const checkApproval = async () => {
-      if (!session) {
+      if (!userId) {
         setProfileApproved(null);
         setUserRole(null);
         return;
@@ -120,7 +128,7 @@ export default function App() {
       const { data, error } = await supabase
         .from("profiles")
         .select("approved, role")
-        .eq("id", session.user.id)
+        .eq("id", userId)
         .single();
 
       if (error) {
@@ -131,22 +139,31 @@ export default function App() {
       }
 
       setProfileApproved(data?.approved === true);
-      setUserRole(data?.role || "user");
+      const role = data?.role || "user";
+      setUserRole(role);
 
-      let initialPage = "dashboard";
-      if (data?.role === "corporate") initialPage = "corporateDashboard";
-      else if (data?.role === "admin") initialPage = "adminDashboard";
-      else if (data?.role === "recruiter") initialPage = "recruiterDashboard";
+      let defaultLandingPage = "dashboard";
+      if (role === "corporate") defaultLandingPage = "corporateDashboard";
+      else if (role === "admin") defaultLandingPage = "adminDashboard";
+      else if (role === "recruiter") defaultLandingPage = "recruiterDashboard";
 
-      // Use replaceState (not pushState) here since this is the initial
-      // landing page for the session, not a user-driven navigation —
-      // we don't want a "back" press to just re-land on the same page.
-      window.history.replaceState({ activePage: initialPage }, "");
-      setActivePage(initialPage);
+      // Preserve currently active page on session/token refresh
+      setActivePage((prev) => {
+        const existingPage =
+          prev && prev !== "dashboard"
+            ? prev
+            : window.history.state?.activePage ||
+              localStorage.getItem("recruitos_active_page");
+
+        const targetPage = existingPage || defaultLandingPage;
+        window.history.replaceState({ activePage: targetPage }, "");
+        localStorage.setItem("recruitos_active_page", targetPage);
+        return targetPage;
+      });
     };
 
     checkApproval();
-  }, [session]);
+  }, [userId]);
 
   // Unread notification count — refreshes on session change and on
   // every navigation (so it clears once the Notifications page is
@@ -179,6 +196,7 @@ export default function App() {
   useEffect(() => {
     function handlePopState(e) {
       if (e.state?.activePage) {
+        localStorage.setItem("recruitos_active_page", e.state.activePage);
         setActivePage(e.state.activePage);
       }
     }
@@ -310,7 +328,10 @@ export default function App() {
             </p>
             <button
               className="logout-link"
-              onClick={() => supabase.auth.signOut()}
+              onClick={() => {
+                localStorage.removeItem("recruitos_active_page");
+                supabase.auth.signOut();
+              }}
             >
               Log out
             </button>
@@ -362,9 +383,15 @@ export default function App() {
     // pages within the app (see the popstate handler above).
     function handleSetActivePage(page) {
       window.history.pushState({ activePage: page }, "");
+      localStorage.setItem("recruitos_active_page", page);
       setActivePage(page);
       setSidebarOpen(false);
     }
+
+    const handleLogout = async () => {
+      localStorage.removeItem("recruitos_active_page");
+      await supabase.auth.signOut();
+    };
 
     return (
       <div id="screen-app" style={{ display: "block" }}>
@@ -447,7 +474,7 @@ export default function App() {
             <span>{session.user.email}</span>
             <span
               className="logout-link"
-              onClick={() => supabase.auth.signOut()}
+              onClick={handleLogout}
             >
               Log out
             </span>
@@ -466,7 +493,7 @@ export default function App() {
             className={sidebarOpen ? "open" : ""}
           />
           <div className="main">
-            <PageComponent setActivePage={setActivePage} user={session.user} />
+            <PageComponent setActivePage={handleSetActivePage} user={session.user} />
           </div>
         </div>
       </div>

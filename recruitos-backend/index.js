@@ -20,7 +20,6 @@ const aptitudeRoutes = require("./aptitudeRoutes");
 const { createGDRoom, createMeetingToken } = require("./dailyService");
 const jdRoutes = require("./jdRoutes");
 const { moveApplicationStage } = require("./pipelineSync");
-const { getRequestProfile } = require("./authHelpers");
 const multer = require("multer");
 const XLSX = require("xlsx");
 // NOTE: pdf-parse is now lazy-loaded (required inside the routes that need it)
@@ -44,16 +43,21 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY,
 );
 
-// ---- COLLEGES ----
-app.get("/api/colleges", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (
-    profile &&
-    (profile.role === "candidate" || profile.role === "corporate")
-  ) {
-    return res.status(403).json({ error: "Not authorized" });
-  }
+const {
+  getRequestProfile,
+  createAuthMiddleware,
+} = require("./authHelpers");
 
+const {
+  requireAuth,
+  requireRole,
+  requireAdmin,
+  requireStaff,
+  requireCorporate,
+} = createAuthMiddleware(supabase);
+
+// ---- COLLEGES ----
+app.get("/api/colleges", requireStaff, async (req, res) => {
   const { course, status, search } = req.query;
   let query = supabase.from("colleges").select("*");
   if (course) query = query.ilike("course", `%${course}%`);
@@ -67,7 +71,7 @@ app.get("/api/colleges", async (req, res) => {
   res.json(data);
 });
 
-app.post("/api/colleges", async (req, res) => {
+app.post("/api/colleges", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("colleges")
     .insert([req.body])
@@ -77,12 +81,17 @@ app.post("/api/colleges", async (req, res) => {
 });
 
 // ---- COMPANIES ----
-app.get("/api/companies", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
+app.get("/api/companies", requireAuth, async (req, res) => {
+  const profile = req.userProfile;
+  if (profile?.role === "candidate") {
+    return res.status(403).json({ error: "Not authorized" });
+  }
   let query = supabase.from("companies").select("*");
 
   if (profile?.role === "corporate" && profile.company_id) {
     query = query.eq("id", profile.company_id);
+  } else if (profile?.role === "corporate" && !profile.company_id) {
+    return res.json([]);
   }
   // admin, recruiter see all companies
 
@@ -91,7 +100,7 @@ app.get("/api/companies", async (req, res) => {
   res.json(data);
 });
 
-app.post("/api/companies", async (req, res) => {
+app.post("/api/companies", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("companies")
     .insert([req.body])
@@ -101,8 +110,8 @@ app.post("/api/companies", async (req, res) => {
 });
 
 // ---- JOB PROFILES ----
-app.get("/api/jobs", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
+app.get("/api/jobs", requireAuth, async (req, res) => {
+  const profile = req.userProfile;
   let query = supabase.from("job_profiles").select("*");
 
   if (profile?.role === "corporate") {
@@ -115,8 +124,8 @@ app.get("/api/jobs", async (req, res) => {
   res.json(data);
 });
 
-app.get("/api/my-applications", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
+app.get("/api/my-applications", requireAuth, async (req, res) => {
+  const profile = req.userProfile;
   if (!profile || profile.role !== "candidate" || !profile.candidate_id) {
     return res.status(403).json({ error: "Not authorized" });
   }
@@ -131,10 +140,10 @@ app.get("/api/my-applications", async (req, res) => {
   res.json(data);
 });
 
-app.get("/api/my-company-jobs", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate" || !profile.company_id) {
-    return res.status(403).json({ error: "Not authorized" });
+app.get("/api/my-company-jobs", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
+  if (!profile || !profile.company_id) {
+    return res.status(403).json({ error: "Company association required" });
   }
 
   const { data: jobs, error } = await supabase
@@ -147,10 +156,10 @@ app.get("/api/my-company-jobs", async (req, res) => {
   res.json(jobs);
 });
 
-app.get("/api/my-company-applications", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate" || !profile.company_id) {
-    return res.status(403).json({ error: "Not authorized" });
+app.get("/api/my-company-applications", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
+  if (!profile || !profile.company_id) {
+    return res.status(403).json({ error: "Company association required" });
   }
 
   const { data: myJobs } = await supabase
@@ -176,13 +185,16 @@ app.get("/api/my-company-applications", async (req, res) => {
 app.get("/api/jobs/public", async (req, res) => {
   const { data, error } = await supabase
     .from("job_profiles")
-    .select("id, title, company, skills");
-  if (error) return res.status(500).json({ error });
+    .select(
+      "id, title, company, location, salary_range, experience, skills, qualification, job_summary, responsibilities, employment_type",
+    )
+    .order("created_at", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message || error });
   res.json(data);
 });
 
 // ---- TRIGGER AI ANALYSIS ----
-app.post("/api/analyze", async (req, res) => {
+app.post("/api/analyze", requireStaff, async (req, res) => {
   const { applicationId } = req.body;
 
   const { data: application, error } = await supabase
@@ -211,7 +223,7 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 // ---- GET ALL ANALYZED RESUMES (for Resume Analyzer page) ----
-app.get("/api/resume/analyzed", async (req, res) => {
+app.get("/api/resume/analyzed", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("applications")
     .select(
@@ -247,7 +259,7 @@ app.get("/api/resume/analyzed", async (req, res) => {
 });
 
 // ---- MARK CANDIDATE SELECTED → fires 3 emails automatically ----
-app.post("/api/candidate/select", async (req, res) => {
+app.post("/api/candidate/select", requireStaff, async (req, res) => {
   const { applicationId, ctc } = req.body;
 
   try {
@@ -320,7 +332,7 @@ app.post("/api/candidate/select", async (req, res) => {
 
 const { sendStudentRejectionEmail } = require("./emailService"); // add to your existing require line for emailService instead of a new line — merge with existing import
 
-app.post("/api/candidate/reject", async (req, res) => {
+app.post("/api/candidate/reject", requireStaff, async (req, res) => {
   const { applicationId } = req.body;
   try {
     const { data: app } = await supabase
@@ -348,7 +360,7 @@ app.post("/api/candidate/reject", async (req, res) => {
 });
 
 // ---- COLLEGE OUTREACH EMAIL ----
-app.post("/api/email/college-outreach", async (req, res) => {
+app.post("/api/email/college-outreach", requireStaff, async (req, res) => {
   try {
     await sendCollegeOutreachEmail(req.body);
     res.json({ success: true });
@@ -358,8 +370,8 @@ app.post("/api/email/college-outreach", async (req, res) => {
 });
 
 // ---- OFFERS ----
-app.get("/api/offers", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
+app.get("/api/offers", requireAuth, async (req, res) => {
+  const profile = req.userProfile;
   let query = supabase
     .from("offers")
     .select("*, candidates(name), job_profiles(title, company, company_id)");
@@ -374,22 +386,15 @@ app.get("/api/offers", async (req, res) => {
     filtered = data.filter(
       (o) => o.job_profiles?.company_id === profile.company_id,
     );
+  } else if (profile?.role !== "admin" && profile?.role !== "recruiter") {
+    return res.status(403).json({ error: "Not authorized" });
   }
-  // admin, recruiter see everything
 
   res.json(filtered);
 });
 
 // ---- JOINING ----
-app.get("/api/joining", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (
-    profile &&
-    (profile.role === "candidate" || profile.role === "corporate")
-  ) {
-    return res.status(403).json({ error: "Not authorized" });
-  }
-
+app.get("/api/joining", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("joining")
     .select("*, candidates(name, college), offers(job_profiles(company))");
@@ -398,15 +403,7 @@ app.get("/api/joining", async (req, res) => {
 });
 
 // ---- COMMUNICATIONS ----
-app.get("/api/communications", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (
-    profile &&
-    (profile.role === "candidate" || profile.role === "corporate")
-  ) {
-    return res.status(403).json({ error: "Not authorized" });
-  }
-
+app.get("/api/communications", requireStaff, async (req, res) => {
   const { collegeId, companyId } = req.query;
   let query = supabase
     .from("communications")
@@ -419,7 +416,7 @@ app.get("/api/communications", async (req, res) => {
   res.json(data);
 });
 
-app.post("/api/communications", async (req, res) => {
+app.post("/api/communications", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("communications")
     .insert([req.body])
@@ -429,18 +426,10 @@ app.post("/api/communications", async (req, res) => {
 });
 
 // ---- GENERATE EMAIL (Comm.jsx "Generate with AI" button) ----
-app.post("/api/generate-email", generateEmail);
-
-if (require.main === module) {
-  app.listen(5000, () =>
-    console.log("✅ RecruitOS backend running on http://localhost:5000"),
-  );
-}
-
-module.exports = app;
+app.post("/api/generate-email", requireStaff, generateEmail);
 
 // Create GD Session
-app.post("/api/gd/create", async (req, res) => {
+app.post("/api/gd/create", requireStaff, async (req, res) => {
   try {
     const { topic, duration_minutes, job_id, candidates } = req.body;
 
@@ -504,7 +493,7 @@ app.post("/api/gd/create", async (req, res) => {
 });
 
 // Create an OFFLINE GD session — no video room, no emails, just a shell for manual ratings
-app.post("/api/gd/create-offline", async (req, res) => {
+app.post("/api/gd/create-offline", requireStaff, async (req, res) => {
   try {
     const { topic, candidates } = req.body;
 
@@ -544,7 +533,7 @@ app.post("/api/gd/create-offline", async (req, res) => {
 });
 
 // Manually add a GD result (for offline/in-person GD sessions)
-app.post("/api/gd/manual", async (req, res) => {
+app.post("/api/gd/manual", requireStaff, async (req, res) => {
   try {
     const {
       candidate_name,
@@ -610,7 +599,7 @@ app.post("/api/gd/manual", async (req, res) => {
 });
 
 // Start GD Session
-app.post("/api/gd/:id/start", async (req, res) => {
+app.post("/api/gd/:id/start", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("gd_sessions")
     .update({ status: "Active", started_at: new Date() })
@@ -623,7 +612,7 @@ app.post("/api/gd/:id/start", async (req, res) => {
 });
 
 // End GD + trigger AI scoring
-app.post("/api/gd/:id/end", async (req, res) => {
+app.post("/api/gd/:id/end", requireStaff, async (req, res) => {
   await supabase
     .from("gd_sessions")
     .update({ status: "Ended", ended_at: new Date() })
@@ -636,7 +625,7 @@ app.post("/api/gd/:id/end", async (req, res) => {
 });
 
 // Get session details + participants + messages
-app.get("/api/gd/:id", async (req, res) => {
+app.get("/api/gd/:id", requireStaff, async (req, res) => {
   const { data: session } = await supabase
     .from("gd_sessions")
     .select("*")
@@ -679,7 +668,7 @@ app.get("/api/gd/:id/join", async (req, res) => {
 });
 
 // Shortlist selected students
-app.post("/api/gd/:id/shortlist", async (req, res) => {
+app.post("/api/gd/:id/shortlist", requireStaff, async (req, res) => {
   const { participantIds } = req.body;
 
   await supabase
@@ -723,6 +712,7 @@ app.post("/api/gd/:id/shortlist", async (req, res) => {
 // Save/update Sir's manual rating for a GD participant
 app.post(
   "/api/gd/participant/:participantId/manual-rating",
+  requireStaff,
   async (req, res) => {
     try {
       const { participantId } = req.params;
@@ -926,20 +916,7 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-async function requireAdmin(req, res, next) {
-  const userId = req.headers["x-user-id"];
-  if (!userId) return res.status(401).json({ error: "Not authenticated" });
-
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .single();
-  if (error || !profile || profile.role !== "admin") {
-    return res.status(403).json({ error: "Admin access required" });
-  }
-  next();
-}
+// requireAdmin is cryptographically verified via createAuthMiddleware(supabase) above
 // Admin: list all pending users
 // Admin: list all pending users
 app.get("/api/auth/pending", requireAdmin, async (req, res) => {
@@ -1096,7 +1073,7 @@ app.post("/api/auth/users/:userId/role", requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 // Log a new call
-app.post("/api/calls", async (req, res) => {
+app.post("/api/calls", requireStaff, async (req, res) => {
   try {
     const {
       recruiter_id,
@@ -1132,7 +1109,7 @@ app.post("/api/calls", async (req, res) => {
 });
 
 // Get all call logs (for reports)
-app.get("/api/calls", async (req, res) => {
+app.get("/api/calls", requireStaff, async (req, res) => {
   const { data, error } = await supabase
     .from("call_logs")
     .select("*")
@@ -1142,7 +1119,7 @@ app.get("/api/calls", async (req, res) => {
 });
 
 // Get recruiter performance summary
-app.get("/api/calls/performance", async (req, res) => {
+app.get("/api/calls/performance", requireStaff, async (req, res) => {
   const { data: calls, error } = await supabase.from("call_logs").select("*");
   if (error) return res.status(500).json({ error: error.message });
 
@@ -1182,7 +1159,7 @@ app.get("/api/calls/performance", async (req, res) => {
   res.json(result);
 });
 
-app.post("/api/bid/suggest", async (req, res) => {
+app.post("/api/bid/suggest", requireStaff, async (req, res) => {
   const {
     candidateName,
     currentSalary,
@@ -1226,7 +1203,7 @@ Respond ONLY in this exact JSON format:
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
     const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
     });
@@ -1241,9 +1218,64 @@ Respond ONLY in this exact JSON format:
     res.status(500).json({ error: err.message });
   }
 });
-app.get("/api/candidate/:id/passport", async (req, res) => {
+
+app.get("/api/candidate/:id/passport", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    const profile = req.userProfile;
+
+    // Candidates can only view their own passport; staff can view any
+    if (profile?.role === "candidate" && profile.candidate_id !== id) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // Corporate users can only view candidates legitimately associated with their company
+    let corporateJobIds = null;
+    if (profile?.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "Company association required" });
+      }
+
+      const { data: myJobs } = await supabase
+        .from("job_profiles")
+        .select("id")
+        .eq("company_id", profile.company_id);
+
+      corporateJobIds = (myJobs || []).map((j) => j.id);
+
+      let isAssociated = false;
+      if (corporateJobIds.length > 0) {
+        const { data: candApp } = await supabase
+          .from("applications")
+          .select("id")
+          .eq("candidate_id", id)
+          .in("job_id", corporateJobIds)
+          .limit(1);
+
+        if (candApp && candApp.length > 0) {
+          isAssociated = true;
+        }
+      }
+
+      if (!isAssociated) {
+        const { data: savedMatch } = await supabase
+          .from("saved_candidates")
+          .select("candidate_id")
+          .eq("company_id", profile.company_id)
+          .eq("candidate_id", id)
+          .limit(1);
+
+        if (savedMatch && savedMatch.length > 0) {
+          isAssociated = true;
+        }
+      }
+
+      if (!isAssociated) {
+        return res.status(403).json({
+          error: "Access denied: candidate is not associated with your company",
+        });
+      }
+    }
 
     const { data: candidate, error: candErr } = await supabase
       .from("candidates")
@@ -1253,11 +1285,21 @@ app.get("/api/candidate/:id/passport", async (req, res) => {
     if (candErr || !candidate)
       return res.status(404).json({ error: "Candidate not found" });
 
-    const { data: applications } = await supabase
+    let appQuery = supabase
       .from("applications")
       .select("*, job_profiles(title, company)")
       .eq("candidate_id", id)
       .order("created_at", { ascending: false });
+
+    if (profile?.role === "corporate") {
+      if (corporateJobIds && corporateJobIds.length > 0) {
+        appQuery = appQuery.in("job_id", corporateJobIds);
+      } else {
+        appQuery = null;
+      }
+    }
+
+    const { data: applications } = appQuery ? await appQuery : { data: [] };
 
     const { data: aptitudeResults } = await supabase
       .from("aptitude_results")
@@ -1273,12 +1315,21 @@ app.get("/api/candidate/:id/passport", async (req, res) => {
       .order("joined_at", { ascending: false })
       .limit(1);
 
-    const { data: interviews } = await supabase
+    let interviewQuery = supabase
       .from("interviews")
       .select("*")
       .eq("candidate_id", id)
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .order("created_at", { ascending: false });
+
+    if (profile?.role === "corporate") {
+      if (corporateJobIds && corporateJobIds.length > 0) {
+        interviewQuery = interviewQuery.or(`type.eq.Mock,job_id.in.(${corporateJobIds.join(",")})`);
+      } else {
+        interviewQuery = interviewQuery.eq("type", "Mock");
+      }
+    }
+
+    const { data: interviews } = await interviewQuery.limit(1);
 
     res.json({
       candidate,
@@ -1294,7 +1345,7 @@ app.get("/api/candidate/:id/passport", async (req, res) => {
 });
 
 // ---- AI EXCEL/PDF IMPORT — CAMPUS DATABASE ----
-app.post("/api/import/campus", upload.single("file"), async (req, res) => {
+app.post("/api/import/campus", requireStaff, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -1351,7 +1402,7 @@ Respond ONLY with a valid JSON array, no other text:
 ]`;
 
     const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
       max_tokens: 4000,
@@ -1369,19 +1420,65 @@ Respond ONLY with a valid JSON array, no other text:
 });
 
 // ---- SAVE IMPORTED CAMPUS DATA ----
-app.post("/api/import/campus/save", async (req, res) => {
+app.post("/api/import/campus/save", requireStaff, async (req, res) => {
   try {
     const { colleges } = req.body;
     if (!colleges || colleges.length === 0) {
       return res.status(400).json({ error: "No data to save" });
     }
 
+    const collegeRows = colleges
+      .filter((c) => c && c.name && c.name.trim())
+      .map((c) => ({
+        name: c.name.trim(),
+        city: c.city || null,
+        course: c.course || null,
+        tpo: c.tpo || null,
+        strength: c.strength ? parseInt(c.strength, 10) : null,
+        last_contact: c.last_contact || null,
+        status: c.status || "Interested",
+        website: c.website || null,
+        institution_type: c.institution_type || null,
+        courses_available: c.courses_available || null,
+      }));
+
     const { data, error } = await supabase
       .from("colleges")
-      .upsert(colleges, { onConflict: "name" })
+      .insert(collegeRows)
       .select();
 
     if (error) return res.status(500).json({ error: error.message });
+
+    if (data && data.length > 0) {
+      for (const raw of colleges) {
+        if (!raw || !raw.name) continue;
+        const saved = data.find(
+          (d) => d.name.toLowerCase() === raw.name.trim().toLowerCase()
+        );
+        if (saved && (raw.tpo || raw.tpo_email)) {
+          const coordName = (raw.tpo || "Placement Officer").trim();
+          const coordEmail = raw.tpo_email ? raw.tpo_email.trim() : null;
+
+          const { data: existing } = await supabase
+            .from("placement_coordinators")
+            .select("id")
+            .eq("college_id", saved.id)
+            .ilike("name", coordName)
+            .limit(1);
+
+          if (!existing || existing.length === 0) {
+            await supabase.from("placement_coordinators").insert([
+              {
+                college_id: saved.id,
+                name: coordName,
+                email: coordEmail,
+                is_current: true,
+              },
+            ]);
+          }
+        }
+      }
+    }
 
     res.json({ success: true, saved: data.length });
   } catch (err) {
@@ -1390,7 +1487,7 @@ app.post("/api/import/campus/save", async (req, res) => {
 });
 
 // ---- AI EXCEL/PDF IMPORT — CORPORATE DATABASE ----
-app.post("/api/import/corporate", upload.single("file"), async (req, res) => {
+app.post("/api/import/corporate", requireStaff, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -1441,7 +1538,7 @@ Respond ONLY with a valid JSON array, no other text:
 ]`;
 
     const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.1,
       max_tokens: 4000,
@@ -1459,16 +1556,30 @@ Respond ONLY with a valid JSON array, no other text:
 });
 
 // ---- SAVE IMPORTED CORPORATE DATA ----
-app.post("/api/import/corporate/save", async (req, res) => {
+app.post("/api/import/corporate/save", requireStaff, async (req, res) => {
   try {
     const { companies } = req.body;
     if (!companies || companies.length === 0) {
       return res.status(400).json({ error: "No data to save" });
     }
 
+    const companyRows = companies
+      .filter((c) => c && c.name && c.name.trim())
+      .map((c) => ({
+        name: c.name.trim(),
+        sector: c.sector || null,
+        hr_name: c.hr_name || null,
+        hr_email: c.hr_email || null,
+        hq_location: c.hq_location || null,
+        hiring_status: c.hiring_status || null,
+        city: c.city || null,
+        hr_phone: c.hr_phone || null,
+        website: c.website || null,
+      }));
+
     const { data, error } = await supabase
       .from("companies")
-      .upsert(companies, { onConflict: "name" })
+      .insert(companyRows)
       .select();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -1479,11 +1590,8 @@ app.post("/api/import/corporate/save", async (req, res) => {
   }
 });
 // Corporate: candidates who applied to this company's jobs
-app.get("/api/corporate/candidates", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate") {
-    return res.status(403).json({ error: "Corporate access required" });
-  }
+app.get("/api/corporate/candidates", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
   if (!profile.company_id) return res.json([]);
 
   const { data: jobs } = await supabase
@@ -1527,11 +1635,8 @@ app.get("/api/corporate/candidates", async (req, res) => {
 });
 
 // Corporate: KPI summary
-app.get("/api/corporate/kpis", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate") {
-    return res.status(403).json({ error: "Corporate access required" });
-  }
+app.get("/api/corporate/kpis", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
   if (!profile.company_id) {
     return res.json({
       availableCandidates: 0,
@@ -1579,15 +1684,11 @@ app.get("/api/corporate/kpis", async (req, res) => {
 // ==============================================================
 // CANDIDATE SEARCH (Corporate) — searches the FULL candidate pool,
 // not just applicants to this company's jobs.
-// Append this block to recruitos-backend/index.js
 // ==============================================================
 
 // Corporate: search the talent pool with filters
-app.get("/api/corporate/candidates/search", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate") {
-    return res.status(403).json({ error: "Corporate access required" });
-  }
+app.get("/api/corporate/candidates/search", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
 
   const {
     name,
@@ -1695,10 +1796,10 @@ app.get("/api/corporate/candidates/search", async (req, res) => {
 });
 
 // Corporate: save a candidate for later
-app.post("/api/corporate/candidates/:candidateId/save", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate" || !profile.company_id) {
-    return res.status(403).json({ error: "Corporate access required" });
+app.post("/api/corporate/candidates/:candidateId/save", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
+  if (!profile.company_id) {
+    return res.status(403).json({ error: "Company association required" });
   }
 
   const { error } = await supabase
@@ -1713,10 +1814,10 @@ app.post("/api/corporate/candidates/:candidateId/save", async (req, res) => {
 });
 
 // Corporate: unsave a candidate
-app.delete("/api/corporate/candidates/:candidateId/save", async (req, res) => {
-  const profile = await getRequestProfile(supabase, req);
-  if (!profile || profile.role !== "corporate" || !profile.company_id) {
-    return res.status(403).json({ error: "Corporate access required" });
+app.delete("/api/corporate/candidates/:candidateId/save", requireCorporate, async (req, res) => {
+  const profile = req.userProfile;
+  if (!profile.company_id) {
+    return res.status(403).json({ error: "Company association required" });
   }
 
   const { error } = await supabase
@@ -1728,3 +1829,11 @@ app.delete("/api/corporate/candidates/:candidateId/save", async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
 });
+
+if (require.main === module) {
+  app.listen(5000, () =>
+    console.log("✅ RecruitOS backend running on http://localhost:5000"),
+  );
+}
+
+module.exports = app;

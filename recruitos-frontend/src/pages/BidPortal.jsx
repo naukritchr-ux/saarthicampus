@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { authHeaders } from '../lib/api';
 
 const PERFORMANCE_LABELS = {
   exceptional: { label: 'Exceptional', color: '#7C3AED', bg: '#EEF0FF', icon: '🚀' },
@@ -97,9 +98,10 @@ export default function BidPortal() {
     setAiSuggestion(null);
 
     try {
+      const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/bid/suggest`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           candidateName: selected.name,
           currentSalary: parseFloat(form.current_salary),

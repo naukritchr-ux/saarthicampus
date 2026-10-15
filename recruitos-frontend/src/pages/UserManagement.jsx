@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Pencil, Trash2, Check, X as XIcon } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { authHeaders } from "../lib/api";
 
 const ROLES = ["admin", "recruiter", "candidate", "corporate"];
 const PAGE_SIZE = 7;
@@ -93,15 +94,16 @@ export default function UserManagement() {
   }, []);
 
   const load = useCallback(async () => {
-    if (!userId) return;
+    const headers = await authHeaders();
+    if (!headers.Authorization) return;
     const res = await fetch(
       `${import.meta.env.VITE_BACKEND_URL}/api/auth/users`,
-      { headers: { "x-user-id": userId } },
+      { headers },
     );
     const data = await res.json();
     setUsers(Array.isArray(data) ? data : []);
     setLoading(false);
-  }, [userId]);
+  }, []);
 
         useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -131,9 +133,10 @@ export default function UserManagement() {
     const role = pendingRole[id];
     if (!role) return;
     setSavingId(id);
+    const headers = await authHeaders();
     await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/users/${id}/role`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-user-id": userId },
+      headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ role }),
     });
     setSavingId(null);
@@ -147,9 +150,10 @@ export default function UserManagement() {
 
   async function approve(id) {
     setActingId(id);
+    const headers = await authHeaders();
     await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/approve/${id}`, {
       method: "POST",
-      headers: { "x-user-id": userId },
+      headers,
     });
     setActingId(null);
     load();
@@ -158,9 +162,10 @@ export default function UserManagement() {
   async function reject(id) {
     if (!window.confirm("Deny this request?")) return;
     setActingId(id);
+    const headers = await authHeaders();
     await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/reject/${id}`, {
       method: "POST",
-      headers: { "x-user-id": userId },
+      headers,
     });
     setActingId(null);
     load();
@@ -169,9 +174,10 @@ export default function UserManagement() {
   async function deleteUser(u) {
     if (!window.confirm(`Delete "${u.name}" (${u.email})? This cannot be undone.`)) return;
     setActingId(u.id);
+    const headers = await authHeaders();
     await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/users/${u.id}`, {
       method: "DELETE",
-      headers: { "x-user-id": userId },
+      headers,
     });
     setActingId(null);
     load();
@@ -188,9 +194,10 @@ export default function UserManagement() {
     setEditError("");
     setEditSaving(true);
     try {
+      const headers = await authHeaders();
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/users/${editUser.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-user-id": userId },
+        headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(editForm),
       });
       const data = await res.json();
@@ -209,9 +216,10 @@ export default function UserManagement() {
     setAddError("");
     setAddSaving(true);
     try {
+      const headers = await authHeaders();
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/users`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-user-id": userId },
+        headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(newUser),
       });
       const data = await res.json();
