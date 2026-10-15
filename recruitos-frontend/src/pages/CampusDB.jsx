@@ -36,6 +36,8 @@ const statusColors = {
   },
 };
 
+const todayDateStr = () => new Date().toISOString().split("T")[0];
+
 const emptyForm = {
   name: "",
   city: "",
@@ -49,7 +51,54 @@ const emptyForm = {
   courses_available: "",
 };
 
-export default function CampusDB() {
+const createInitialCoordinator = () => ({
+  name: "",
+  phone: "",
+  email: "",
+  effective_from: todayDateStr(),
+});
+
+const emptyCoordForm = {
+  name: "",
+  phone: "",
+  email: "",
+  effective_from: todayDateStr(),
+};
+
+function formatDateTime(isoString) {
+  if (!isoString) return "—";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return d.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+function formatDate(isoDate) {
+  if (!isoDate) return "—";
+  try {
+    const d = new Date(isoDate);
+    if (isNaN(d.getTime())) return isoDate;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return isoDate;
+  }
+}
+
+export default function CampusDB({ user }) {
   const [activeCourse, setActiveCourse] = useState("All");
   const [customCourseText, setCustomCourseText] = useState("");
   const [search, setSearch] = useState("");
@@ -62,8 +111,11 @@ export default function CampusDB() {
   // Add/Edit college popup
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [newCoordinators, setNewCoordinators] = useState([createInitialCoordinator()]);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [formErrors, setFormErrors] = useState({});
+  const [newCoordErrors, setNewCoordErrors] = useState({});
 
   // Excel import
   const [importRows, setImportRows] = useState(null);
@@ -75,15 +127,30 @@ export default function CampusDB() {
   const [coordinatorsByCollege, setCoordinatorsByCollege] = useState({});
   const [loadingCoordinators, setLoadingCoordinators] = useState(false);
 
-  // Coordinator add form inside Edit College popup
+  // Coordinator add / replace form
   const [showCoordinatorForm, setShowCoordinatorForm] = useState(false);
-  const [coordForm, setCoordForm] = useState({
+  const [isReplacing, setIsReplacing] = useState(false);
+  const [replacingTargetCoord, setReplacingTargetCoord] = useState(null);
+  const [coordForm, setCoordForm] = useState(emptyCoordForm);
+  const [savingCoord, setSavingCoord] = useState(false);
+
+  // Edit existing coordinator details
+  const [editingCoord, setEditingCoord] = useState(null);
+  const [editCoordForm, setEditCoordForm] = useState({
     name: "",
     phone: "",
     email: "",
+    effective_from: "",
   });
+  const [savingEditCoord, setSavingEditCoord] = useState(false);
+
+  // History modal
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyList, setHistoryList] = useState([]);
+  const [selectedHistoryCoordId, setSelectedHistoryCoordId] = useState(null);
+
   const [showImport, setShowImport] = useState(false);
-  const [savingCoord, setSavingCoord] = useState(false);
 
   // --------------------------------------------------
   // FETCH ALL COLLEGES
@@ -230,13 +297,15 @@ export default function CampusDB() {
       courses_available: c.courses_available || "",
     });
 
+    setFormErrors({});
+    setNewCoordErrors({});
+    setNewCoordinators([createInitialCoordinator()]);
     setShowCoordinatorForm(false);
-
-    setCoordForm({
-      name: "",
-      phone: "",
-      email: "",
-    });
+    setIsReplacing(false);
+    setReplacingTargetCoord(null);
+    setCoordForm(emptyCoordForm);
+    setEditingCoord(null);
+    setShowHistoryModal(false);
 
     setShowForm(true);
 
@@ -247,14 +316,16 @@ export default function CampusDB() {
   function startAdd() {
     setEditingId(null);
     setForm(emptyForm);
+    setFormErrors({});
+    setNewCoordErrors({});
+    setNewCoordinators([createInitialCoordinator()]);
 
     setShowCoordinatorForm(false);
-
-    setCoordForm({
-      name: "",
-      phone: "",
-      email: "",
-    });
+    setIsReplacing(false);
+    setReplacingTargetCoord(null);
+    setCoordForm(emptyCoordForm);
+    setEditingCoord(null);
+    setShowHistoryModal(false);
 
     setShowForm(true);
   }
@@ -263,36 +334,215 @@ export default function CampusDB() {
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setFormErrors({});
+    setNewCoordErrors({});
+    setNewCoordinators([createInitialCoordinator()]);
 
     setShowCoordinatorForm(false);
+    setIsReplacing(false);
+    setReplacingTargetCoord(null);
+    setCoordForm(emptyCoordForm);
+    setEditingCoord(null);
+    setShowHistoryModal(false);
+  }
 
-    setCoordForm({
-      name: "",
-      phone: "",
-      email: "",
+  function handleNewCoordinatorChange(index, field, value) {
+    setNewCoordinators((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
     });
+
+    if (newCoordErrors[index]?.[field]) {
+      setNewCoordErrors((prev) => {
+        const next = { ...prev };
+        if (next[index]) {
+          const nextRow = { ...next[index] };
+          delete nextRow[field];
+          if (Object.keys(nextRow).length === 0) {
+            delete next[index];
+          } else {
+            next[index] = nextRow;
+          }
+        }
+        return next;
+      });
+    }
+  }
+
+  function handleAddCoordinatorField() {
+    setNewCoordinators((prev) => [...prev, createInitialCoordinator()]);
+  }
+
+  function handleRemoveCoordinatorField(index) {
+    setNewCoordinators((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
+
+    setNewCoordErrors((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((k) => {
+        const ki = parseInt(k, 10);
+        if (ki < index) next[ki] = prev[ki];
+        else if (ki > index) next[ki - 1] = prev[ki];
+      });
+      return next;
+    });
+  }
+
+  // Client-side helper fallback to aggregate ALL active coordinators into colleges.tpo
+  async function syncCollegeTpoClientFallback(collegeId) {
+    if (!collegeId) return;
+    try {
+      const { data: activeCoords, error } = await supabase
+        .from("placement_coordinators")
+        .select("name, created_at")
+        .eq("college_id", collegeId)
+        .eq("is_current", true)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.warn("Could not query active coordinators for tpo sync fallback:", error);
+        return;
+      }
+
+      const names = [];
+      (activeCoords || []).forEach((c) => {
+        const trimmed = (c.name || "").trim();
+        if (trimmed && !names.includes(trimmed)) {
+          names.push(trimmed);
+        }
+      });
+
+      const combined = names.length > 0 ? names.join(", ") : null;
+      await supabase
+        .from("colleges")
+        .update({ tpo: combined })
+        .eq("id", collegeId);
+
+      setForm((prev) => ({
+        ...prev,
+        tpo: combined || "",
+      }));
+
+      return combined;
+    } catch (e) {
+      console.warn("Error in syncCollegeTpoClientFallback:", e);
+    }
   }
 
   async function handleSaveCollege(e) {
     e.preventDefault();
 
+    const errors = {};
+    const coordErrors = {};
+    let hasCoordErrors = false;
+    let firstInvalidTargetId = null;
+
     if (!form.name.trim()) {
-      alert("Please enter college name.");
-      return;
+      errors.name = "Please enter college name.";
+      firstInvalidTargetId = "college-name-input";
     }
 
-    if (form.tpo && form.tpo.trim() === "") {
-      alert("Please enter a valid TPO name.");
+    if (!editingId) {
+      for (let i = 0; i < newCoordinators.length; i++) {
+        const c = newCoordinators[i];
+        const num = i + 1;
+        const rowErr = {};
+
+        // 1. Placement Coordinator Name (Mandatory)
+        if (!c.name?.trim()) {
+          rowErr.name = "Placement Coordinator Name is required.";
+          if (!firstInvalidTargetId) {
+            firstInvalidTargetId = `coord-name-${i}`;
+          }
+        }
+
+        // 2. Contact Number (Mandatory, 10 digits)
+        const cleanPhone = (c.phone || "").trim();
+        if (!cleanPhone) {
+          rowErr.phone = "Contact Number is required.";
+          if (!firstInvalidTargetId) {
+            firstInvalidTargetId = `coord-phone-${i}`;
+          }
+        } else if (cleanPhone.length !== 10) {
+          rowErr.phone = "Please enter a valid 10-digit Contact Number.";
+          if (!firstInvalidTargetId) {
+            firstInvalidTargetId = `coord-phone-${i}`;
+          }
+        }
+
+        // 3. Email Address (Mandatory, valid email format)
+        const cleanEmail = (c.email || "").trim();
+        if (!cleanEmail) {
+          rowErr.email = "Email Address is required.";
+          if (!firstInvalidTargetId) {
+            firstInvalidTargetId = `coord-email-${i}`;
+          }
+        } else if (!isValidEmail(cleanEmail)) {
+          rowErr.email = "Please enter a valid Email Address.";
+          if (!firstInvalidTargetId) {
+            firstInvalidTargetId = `coord-email-${i}`;
+          }
+        }
+
+        // 4. Effective From Date (Mandatory, valid date)
+        if (!c.effective_from || isNaN(new Date(c.effective_from).getTime())) {
+          rowErr.effective_from = "Please enter a valid Effective From Date.";
+          if (!firstInvalidTargetId) {
+            firstInvalidTargetId = `coord-date-${i}`;
+          }
+        }
+
+        if (Object.keys(rowErr).length > 0) {
+          coordErrors[i] = rowErr;
+          hasCoordErrors = true;
+        }
+      }
+    }
+
+    if (Object.keys(errors).length > 0 || hasCoordErrors) {
+      setFormErrors(errors);
+      setNewCoordErrors(coordErrors);
+
+      if (firstInvalidTargetId) {
+        setTimeout(() => {
+          const el = document.getElementById(firstInvalidTargetId);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (typeof el.focus === "function") {
+              el.focus();
+            }
+          }
+        }, 50);
+      }
       return;
     }
 
     setSaving(true);
 
+    const validCoordinators = !editingId
+      ? newCoordinators.map((c) => ({
+          name: c.name.trim(),
+          phone: c.phone.trim(),
+          email: c.email.trim(),
+          effective_from: c.effective_from || todayDateStr(),
+        }))
+      : [];
+
+    // Consistent formatting rule: Comma-separated list of ALL active placement coordinator names
+    const combinedTpo = !editingId
+      ? (validCoordinators.length > 0
+          ? validCoordinators.map((c) => c.name).filter(Boolean).join(", ")
+          : (form.tpo?.trim() || null))
+      : (form.tpo?.trim() || null);
+
     const payload = {
       name: form.name.trim(),
       city: form.city?.trim() || null,
       course: form.course || null,
-      tpo: form.tpo?.trim() || null,
+      tpo: combinedTpo,
       website: form.website?.trim() || null,
       strength: form.strength ? parseInt(form.strength, 10) : null,
       last_contact: form.last_contact || null,
@@ -323,25 +573,41 @@ export default function CampusDB() {
         }));
       }
     } else {
-      const { data, error } = await supabase
-        .from("colleges")
-        .insert([payload])
-        .select()
-        .single();
+      // Atomic RPC creation for college, coordinators, and audit history
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc(
+          "create_college_with_coordinators",
+          {
+            p_college: payload,
+            p_coordinators: validCoordinators,
+          }
+        );
 
-      if (error) {
-        console.error("Failed to add college:", error);
-
-        alert("Could not add college. Check console for details.");
-      } else {
-        await loadColleges();
-
-        if (data?.id) {
-          setEditingId(data.id);
-          await loadCoordinators(data.id);
+        if (rpcError) {
+          if (isRpcMissingError(rpcError)) {
+            throw new Error(
+              "The atomic database RPC 'create_college_with_coordinators' is not installed in Supabase. " +
+              "Please run the database migration before creating colleges."
+            );
+          }
+          throw new Error(rpcError.message || "Failed to create college");
         }
 
-        alert("College added successfully.");
+        const newCollegeId = rpcData?.college?.id;
+        await loadColleges();
+
+        if (newCollegeId) {
+          setEditingId(newCollegeId);
+          await loadCoordinators(newCollegeId);
+        }
+
+        const countMsg = validCoordinators.length > 0
+          ? ` and ${validCoordinators.length} placement coordinator(s)`
+          : "";
+        alert(`College${countMsg} saved successfully.`);
+      } catch (err) {
+        console.error("Failed to add college:", err);
+        alert(err.message || "Could not add college. Check console for details.");
       }
     }
 
@@ -543,8 +809,39 @@ export default function CampusDB() {
   }
 
   // --------------------------------------------------
-  // COORDINATORS
+  // COORDINATORS & AUDIT HISTORY
   // --------------------------------------------------
+
+  async function getCurrentUserDisplay() {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const currentAuthUser = authData?.user || user;
+      if (!currentAuthUser) {
+        return { id: null, name: "Staff", email: null };
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("name, email")
+        .eq("id", currentAuthUser.id)
+        .single();
+
+      const resolvedName =
+        profile?.name ||
+        currentAuthUser.user_metadata?.name ||
+        currentAuthUser.user_metadata?.full_name ||
+        currentAuthUser.email?.split("@")[0] ||
+        "Staff";
+
+      return {
+        id: currentAuthUser.id,
+        name: resolvedName,
+        email: profile?.email || currentAuthUser.email || null,
+      };
+    } catch {
+      return { id: user?.id || null, name: "Staff", email: user?.email || null };
+    }
+  }
 
   async function loadCoordinators(collegeId) {
     setLoadingCoordinators(true);
@@ -562,7 +859,6 @@ export default function CampusDB() {
 
     if (error) {
       console.error("Failed to load coordinators:", error);
-
       alert(
         "Could not load placement coordinators. Check console for details.",
       );
@@ -599,32 +895,260 @@ export default function CampusDB() {
     }));
   }
 
-  function openCoordinatorForm() {
+  function openCoordinatorForm(replace = false, targetCoord = null) {
     if (!editingId) {
       alert("Please save the college first before adding a coordinator.");
       return;
     }
 
-    setCoordForm({
-      name: "",
-      phone: "",
-      email: "",
-    });
-
+    setIsReplacing(replace);
+    setReplacingTargetCoord(targetCoord);
+    setCoordForm(emptyCoordForm);
     setShowCoordinatorForm(true);
   }
 
   function cancelCoordinatorForm() {
     setShowCoordinatorForm(false);
+    setIsReplacing(false);
+    setReplacingTargetCoord(null);
+    setCoordForm(emptyCoordForm);
+  }
 
-    setCoordForm({
-      name: "",
-      phone: "",
-      email: "",
+  function openEditCoordinatorModal(coord) {
+    setEditingCoord(coord);
+    setEditCoordForm({
+      name: coord.name || "",
+      phone: coord.phone || "",
+      email: coord.email || "",
+      effective_from: coord.effective_from
+        ? coord.effective_from.split("T")[0]
+        : todayDateStr(),
     });
   }
 
-  async function handleAddCoordinator(e) {
+  function cancelEditCoordinatorModal() {
+    setEditingCoord(null);
+    setEditCoordForm({
+      name: "",
+      phone: "",
+      email: "",
+      effective_from: "",
+    });
+  }
+
+  async function openHistoryModal(coordId = null) {
+    if (!editingId) return;
+    setSelectedHistoryCoordId(coordId);
+    setShowHistoryModal(true);
+    setHistoryLoading(true);
+
+    try {
+      let query = supabase
+        .from("placement_coordinator_history")
+        .select("*")
+        .eq("college_id", editingId)
+        .order("changed_at", { ascending: false });
+
+      if (coordId) {
+        query = query.eq("coordinator_id", coordId);
+      }
+
+      const { data, error: histError } = await query;
+      if (histError) {
+        console.warn("Could not load from placement_coordinator_history:", histError);
+        setHistoryList([]);
+      } else {
+        setHistoryList(data ?? []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch history:", err);
+      setHistoryList([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  function closeHistoryModal() {
+    setShowHistoryModal(false);
+    setSelectedHistoryCoordId(null);
+    setHistoryList([]);
+  }
+
+  function isRpcMissingError(err) {
+    if (!err) return false;
+    const msg = (err.message || "").toLowerCase();
+    const code = err.code || "";
+    return (
+      code === "PGRST202" ||
+      code === "42883" ||
+      msg.includes("function") ||
+      msg.includes("not found") ||
+      msg.includes("schema cache")
+    );
+  }
+
+  // Fallback for Add/Replace if RPC function is not yet deployed
+  async function fallbackAddOrReplaceCoordinator(currentCoord) {
+    const userInfo = await getCurrentUserDisplay();
+    const nowIso = new Date().toISOString();
+
+    // 1. Archive previous current coordinator
+    if (currentCoord) {
+      const { error: archErr } = await supabase
+        .from("placement_coordinators")
+        .update({
+          is_current: false,
+          ended_at: nowIso,
+          updated_at: nowIso,
+          updated_by: userInfo.id,
+          updated_by_name: userInfo.name,
+        })
+        .eq("id", currentCoord.id);
+
+      if (archErr) throw archErr;
+
+      // History insertion MUST succeed
+      const { error: histArchErr } = await supabase.from("placement_coordinator_history").insert([
+        {
+          college_id: editingId,
+          coordinator_id: currentCoord.id,
+          action: "REPLACED",
+          previous_values: {
+            name: currentCoord.name,
+            phone: currentCoord.phone,
+            email: currentCoord.email,
+            is_current: true,
+            effective_from: currentCoord.effective_from,
+          },
+          new_values: {
+            is_current: false,
+            ended_at: nowIso,
+            replaced_by: coordForm.name.trim(),
+          },
+          changed_at: nowIso,
+          changed_by: userInfo.id,
+          changed_by_name: userInfo.name,
+          changed_by_email: userInfo.email,
+        },
+      ]);
+
+      if (histArchErr) {
+        throw new Error("Failed to record outgoing coordinator in audit history: " + histArchErr.message);
+      }
+    }
+
+    // 2. Insert new coordinator
+    const { data: newCoordRows, error: insertError } = await supabase
+      .from("placement_coordinators")
+      .insert([
+        {
+          college_id: editingId,
+          name: coordForm.name.trim(),
+          phone: coordForm.phone || null,
+          email: coordForm.email || null,
+          is_current: true,
+          effective_from: coordForm.effective_from || todayDateStr(),
+          created_at: nowIso,
+          updated_at: nowIso,
+          created_by: userInfo.id,
+          created_by_name: userInfo.name,
+          updated_by: userInfo.id,
+          updated_by_name: userInfo.name,
+        },
+      ])
+      .select();
+
+    if (insertError) throw insertError;
+
+    const newCoordId = newCoordRows?.[0]?.id;
+
+    // 3. Log history for new coordinator - MUST succeed
+    const { error: histCreateErr } = await supabase.from("placement_coordinator_history").insert([
+      {
+        college_id: editingId,
+        coordinator_id: newCoordId,
+        action: "CREATED",
+        previous_values: null,
+        new_values: {
+          name: coordForm.name.trim(),
+          phone: coordForm.phone || null,
+          email: coordForm.email || null,
+          is_current: true,
+          effective_from: coordForm.effective_from || todayDateStr(),
+        },
+        changed_at: nowIso,
+        changed_by: userInfo.id,
+        changed_by_name: userInfo.name,
+        changed_by_email: userInfo.email,
+      },
+    ]);
+
+    if (histCreateErr) {
+      throw new Error("Failed to record new coordinator in audit history: " + histCreateErr.message);
+    }
+
+    // 4. Synchronize colleges.tpo with all active coordinators
+    await syncCollegeTpoClientFallback(editingId);
+  }
+
+  // Fallback for adding a coordinator without retiring existing coordinators
+  async function fallbackAddCoordinatorWithoutRetiring() {
+    const userInfo = await getCurrentUserDisplay();
+    const nowIso = new Date().toISOString();
+
+    const { data: newCoordRows, error: insertError } = await supabase
+      .from("placement_coordinators")
+      .insert([
+        {
+          college_id: editingId,
+          name: coordForm.name.trim(),
+          phone: coordForm.phone || null,
+          email: coordForm.email || null,
+          is_current: true,
+          effective_from: coordForm.effective_from || todayDateStr(),
+          created_at: nowIso,
+          updated_at: nowIso,
+          created_by: userInfo.id,
+          created_by_name: userInfo.name,
+          updated_by: userInfo.id,
+          updated_by_name: userInfo.name,
+        },
+      ])
+      .select();
+
+    if (insertError) throw insertError;
+
+    const newCoordId = newCoordRows?.[0]?.id;
+
+    const { error: histCreateErr } = await supabase.from("placement_coordinator_history").insert([
+      {
+        college_id: editingId,
+        coordinator_id: newCoordId,
+        action: "CREATED",
+        previous_values: null,
+        new_values: {
+          name: coordForm.name.trim(),
+          phone: coordForm.phone || null,
+          email: coordForm.email || null,
+          is_current: true,
+          effective_from: coordForm.effective_from || todayDateStr(),
+        },
+        changed_at: nowIso,
+        changed_by: userInfo.id,
+        changed_by_name: userInfo.name,
+        changed_by_email: userInfo.email,
+      },
+    ]);
+
+    if (histCreateErr) {
+      throw new Error("Failed to record new coordinator in audit history: " + histCreateErr.message);
+    }
+
+    // Synchronize colleges.tpo with all active coordinators
+    await syncCollegeTpoClientFallback(editingId);
+  }
+
+  async function handleAddOrReplaceCoordinator(e) {
     e.preventDefault();
 
     if (!editingId) {
@@ -632,141 +1156,365 @@ export default function CampusDB() {
       return;
     }
 
-    if (!coordForm.name.trim()) {
-      alert("Please enter coordinator name.");
+    const trimmedName = coordForm.name.trim();
+    if (!trimmedName) {
+      alert("Placement Coordinator Name is required.");
       return;
     }
 
-    if (coordForm.email && !isValidEmail(coordForm.email)) {
-      alert("Please enter a valid coordinator email address.");
+    const cleanPhone = sanitizePhone ? sanitizePhone(coordForm.phone || "") : (coordForm.phone || "").replace(/\D/g, "");
+    if (!cleanPhone) {
+      alert("Contact Number is required.");
+      return;
+    }
+    if (cleanPhone.length !== 10) {
+      alert("Please enter a valid 10-digit Contact Number.");
+      return;
+    }
+
+    const cleanEmail = (coordForm.email || "").trim();
+    if (!cleanEmail) {
+      alert("Email Address is required.");
+      return;
+    }
+    if (!isValidEmail(cleanEmail)) {
+      alert("Please enter a valid Email Address.");
+      return;
+    }
+
+    const effectiveDate = (coordForm.effective_from || "").trim();
+    if (!effectiveDate || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) || isNaN(new Date(effectiveDate + "T00:00:00").getTime())) {
+      alert("Please enter a valid Effective From Date.");
+      return;
+    }
+
+    const currentList = coordinatorsByCollege[editingId] || [];
+    const activeList = currentList.filter((c) => c.is_current);
+
+    if (isReplacing && activeList.length > 1 && !replacingTargetCoord) {
+      alert("College has multiple active coordinators. Please select which coordinator you want to replace.");
       return;
     }
 
     setSavingCoord(true);
 
     try {
-      // Archive existing current coordinators
-      // before making the new coordinator current.
-      const { error: archiveError } = await supabase
-        .from("placement_coordinators")
-        .update({
-          is_current: false,
-          ended_at: new Date().toISOString(),
-        })
-        .eq("college_id", editingId)
-        .eq("is_current", true);
+      if (isReplacing) {
+        // Find targeted coordinator to replace
+        const targetCoord = replacingTargetCoord || (activeList.length === 1 ? activeList[0] : null);
 
-      if (archiveError) {
-        console.error("Failed to archive previous coordinator:", archiveError);
-
-        alert(
-          "Could not archive previous coordinator. Check console for details.",
+        const { error: rpcError } = await supabase.rpc(
+          "replace_placement_coordinator",
+          {
+            p_college_id: editingId.toString(),
+            p_name: trimmedName,
+            p_phone: cleanPhone,
+            p_email: cleanEmail,
+            p_effective_from: effectiveDate,
+            p_target_coordinator_id: targetCoord?.id ? targetCoord.id.toString() : null,
+          },
         );
 
-        return;
-      }
-
-      // Add new current coordinator
-      const { error: insertError } = await supabase
-        .from("placement_coordinators")
-        .insert([
+        if (rpcError) {
+          if (isRpcMissingError(rpcError)) {
+            console.warn("replace_placement_coordinator RPC unavailable, using fallback:", rpcError);
+            await fallbackAddOrReplaceCoordinator(targetCoord);
+          } else {
+            throw new Error(rpcError.message || "Failed to replace coordinator");
+          }
+        }
+      } else {
+        // Add new coordinator without retiring existing coordinators
+        const { error: rpcError } = await supabase.rpc(
+          "add_placement_coordinator",
           {
-            college_id: editingId,
-
-            name: coordForm.name.trim(),
-
-            phone: coordForm.phone || null,
-
-            email: coordForm.email || null,
-
-            is_current: true,
+            p_college_id: editingId.toString(),
+            p_name: trimmedName,
+            p_phone: cleanPhone,
+            p_email: cleanEmail,
+            p_effective_from: effectiveDate,
           },
-        ]);
+        );
 
-      if (insertError) {
-        console.error("Failed to add coordinator:", insertError);
-
-        alert("Could not add coordinator. Check console for details.");
-
-        return;
+        if (rpcError) {
+          if (isRpcMissingError(rpcError)) {
+            console.warn("add_placement_coordinator RPC unavailable, using fallback:", rpcError);
+            await fallbackAddCoordinatorWithoutRetiring();
+          } else {
+            throw new Error(rpcError.message || "Failed to add coordinator");
+          }
+        }
       }
-
-      // Keep the main colleges.tpo column
-      // synchronized with current coordinator.
-      await supabase
-        .from("colleges")
-        .update({
-          tpo: coordForm.name.trim(),
-        })
-        .eq("id", editingId);
-
-      setForm((prev) => ({
-        ...prev,
-        tpo: coordForm.name.trim(),
-      }));
 
       await reloadCoordinators(editingId);
-
       await loadColleges();
 
-      setShowCoordinatorForm(false);
+      // Refresh form.tpo with newly synchronized all active coordinator names
+      const { data: updatedCollegeRow } = await supabase
+        .from("colleges")
+        .select("tpo")
+        .eq("id", editingId)
+        .maybeSingle();
 
-      setCoordForm({
-        name: "",
-        phone: "",
-        email: "",
-      });
+      if (updatedCollegeRow) {
+        setForm((prev) => ({
+          ...prev,
+          tpo: updatedCollegeRow.tpo || "",
+        }));
+      }
+
+      setShowCoordinatorForm(false);
+      setIsReplacing(false);
+      setReplacingTargetCoord(null);
+      setCoordForm(emptyCoordForm);
+    } catch (err) {
+      console.error("Failed to add or replace coordinator:", err);
+      alert("Could not save coordinator: " + (err.message || "Check console for details"));
     } finally {
       setSavingCoord(false);
     }
   }
 
-  async function handleRetireCoordinator(coord) {
-    if (
-      !window.confirm(
-        `Mark "${coord.name}" as no longer the current coordinator?`,
-      )
-    ) {
+  // Fallback for updating coordinator details if RPC function is not yet deployed
+  async function fallbackUpdateCoordinatorDetails() {
+    const userInfo = await getCurrentUserDisplay();
+    const nowIso = new Date().toISOString();
+
+    const prevVals = {
+      name: editingCoord.name,
+      phone: editingCoord.phone,
+      email: editingCoord.email,
+      effective_from: editingCoord.effective_from,
+    };
+
+    const newVals = {
+      name: editCoordForm.name.trim(),
+      phone: editCoordForm.phone || null,
+      email: editCoordForm.email || null,
+      effective_from: editCoordForm.effective_from || editingCoord.effective_from,
+    };
+
+    const { error: updateError } = await supabase
+      .from("placement_coordinators")
+      .update({
+        name: newVals.name,
+        phone: newVals.phone,
+        email: newVals.email,
+        effective_from: newVals.effective_from,
+        updated_at: nowIso,
+        updated_by: userInfo.id,
+        updated_by_name: userInfo.name,
+      })
+      .eq("id", editingCoord.id);
+
+    if (updateError) throw updateError;
+
+    // Log history - MUST succeed
+    const { error: histUpdateErr } = await supabase.from("placement_coordinator_history").insert([
+      {
+        college_id: editingId,
+        coordinator_id: editingCoord.id,
+        action: "UPDATED",
+        previous_values: prevVals,
+        new_values: newVals,
+        changed_at: nowIso,
+        changed_by: userInfo.id,
+        changed_by_name: userInfo.name,
+        changed_by_email: userInfo.email,
+      },
+    ]);
+
+    if (histUpdateErr) {
+      throw new Error("Failed to record update in audit history: " + histUpdateErr.message);
+    }
+
+    if (editingCoord.is_current) {
+      await syncCollegeTpoClientFallback(editingId);
+    }
+  }
+
+  async function handleUpdateCoordinatorDetails(e) {
+    e.preventDefault();
+
+    if (!editingCoord) return;
+
+    const trimmedName = editCoordForm.name.trim();
+    if (!trimmedName) {
+      alert("Placement Coordinator Name is required.");
       return;
     }
+
+    const cleanPhone = sanitizePhone ? sanitizePhone(editCoordForm.phone || "") : (editCoordForm.phone || "").replace(/\D/g, "");
+    if (!cleanPhone) {
+      alert("Contact Number is required.");
+      return;
+    }
+    if (cleanPhone.length !== 10) {
+      alert("Please enter a valid 10-digit Contact Number.");
+      return;
+    }
+
+    const cleanEmail = (editCoordForm.email || "").trim();
+    if (!cleanEmail) {
+      alert("Email Address is required.");
+      return;
+    }
+    if (!isValidEmail(cleanEmail)) {
+      alert("Please enter a valid Email Address.");
+      return;
+    }
+
+    const effectiveDate = (editCoordForm.effective_from || "").trim();
+    if (!effectiveDate || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) || isNaN(new Date(effectiveDate + "T00:00:00").getTime())) {
+      alert("Please enter a valid Effective From Date.");
+      return;
+    }
+
+    setSavingEditCoord(true);
+
+    try {
+      // Attempt PostgreSQL atomic RPC
+      const { error: rpcError } = await supabase.rpc(
+        "update_placement_coordinator_details",
+        {
+          p_coordinator_id: editingCoord.id.toString(),
+          p_name: trimmedName,
+          p_phone: cleanPhone,
+          p_email: cleanEmail,
+          p_effective_from: effectiveDate,
+        },
+      );
+
+      if (rpcError) {
+        if (isRpcMissingError(rpcError)) {
+          console.warn("update_placement_coordinator_details RPC unavailable, using fallback:", rpcError);
+          await fallbackUpdateCoordinatorDetails();
+        } else {
+          throw new Error(rpcError.message || "Failed to update coordinator");
+        }
+      }
+
+      await reloadCoordinators(editingId);
+      await loadColleges();
+
+      // Refresh form.tpo with newly synchronized all active coordinator names
+      const { data: updatedCollegeRow } = await supabase
+        .from("colleges")
+        .select("tpo")
+        .eq("id", editingId)
+        .maybeSingle();
+
+      if (updatedCollegeRow) {
+        setForm((prev) => ({
+          ...prev,
+          tpo: updatedCollegeRow.tpo || "",
+        }));
+      }
+
+      setEditingCoord(null);
+    } catch (err) {
+      console.error("Failed to update coordinator details:", err);
+      alert("Could not update coordinator: " + (err.message || "Check console for details"));
+    } finally {
+      setSavingEditCoord(false);
+    }
+  }
+
+  async function fallbackRetireCoordinator(coord) {
+    const userInfo = await getCurrentUserDisplay();
+    const nowIso = new Date().toISOString();
 
     const { error } = await supabase
       .from("placement_coordinators")
       .update({
         is_current: false,
-        ended_at: new Date().toISOString(),
+        ended_at: nowIso,
+        updated_at: nowIso,
+        updated_by: userInfo.id,
+        updated_by_name: userInfo.name,
       })
       .eq("id", coord.id);
 
-    if (error) {
-      console.error("Failed to retire coordinator:", error);
+    if (error) throw error;
 
-      alert("Could not update coordinator. Check console for details.");
-    } else {
-      await reloadCoordinators(coord.college_id);
+    const { error: histRetireErr } = await supabase.from("placement_coordinator_history").insert([
+      {
+        college_id: coord.college_id,
+        coordinator_id: coord.id,
+        action: "RETIRED",
+        previous_values: {
+          name: coord.name,
+          phone: coord.phone,
+          email: coord.email,
+          is_current: true,
+          effective_from: coord.effective_from,
+          ended_at: coord.ended_at,
+        },
+        new_values: {
+          is_current: false,
+          ended_at: nowIso,
+        },
+        changed_at: nowIso,
+        changed_by: userInfo.id,
+        changed_by_name: userInfo.name,
+        changed_by_email: userInfo.email,
+      },
+    ]);
+
+    if (histRetireErr) {
+      throw new Error("Failed to record retirement in audit history: " + histRetireErr.message);
     }
+
+    // Recalculate colleges.tpo to contain only remaining active coordinators
+    await syncCollegeTpoClientFallback(coord.college_id);
   }
 
-  async function handleDeleteCoordinator(coord) {
+  async function handleRetireCoordinator(coord) {
     if (
       !window.confirm(
-        `Permanently delete "${coord.name}" from records? This cannot be undone.`,
+        `Mark "${coord.name}" as no longer the current coordinator?\nThis safely archives the coordinator and preserves complete history.`,
       )
     ) {
       return;
     }
 
-    const { error } = await supabase
-      .from("placement_coordinators")
-      .delete()
-      .eq("id", coord.id);
+    try {
+      const { error: rpcError } = await supabase.rpc(
+        "retire_placement_coordinator",
+        {
+          p_coordinator_id: coord.id.toString(),
+        },
+      );
 
-    if (error) {
-      console.error("Failed to delete coordinator:", error);
+      if (rpcError) {
+        if (isRpcMissingError(rpcError)) {
+          console.warn("retire_placement_coordinator RPC unavailable, using fallback:", rpcError);
+          await fallbackRetireCoordinator(coord);
+        } else {
+          throw new Error(rpcError.message || "Failed to retire coordinator");
+        }
+      }
 
-      alert("Could not delete coordinator. Check console for details.");
-    } else {
       await reloadCoordinators(coord.college_id);
+      await loadColleges();
+
+      if (editingId && editingId.toString() === coord.college_id.toString()) {
+        const { data: updatedCollegeRow } = await supabase
+          .from("colleges")
+          .select("tpo")
+          .eq("id", coord.college_id)
+          .maybeSingle();
+
+        if (updatedCollegeRow) {
+          setForm((prev) => ({
+            ...prev,
+            tpo: updatedCollegeRow.tpo || "",
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to retire coordinator:", err);
+      alert("Could not update coordinator: " + (err.message || "Check console for details"));
     }
   }
 
@@ -778,7 +1526,7 @@ export default function CampusDB() {
     ? (coordinatorsByCollege[editingId] ?? [])
     : [];
 
-  const currentCoordinator = currentCollegeCoordinators.find(
+  const currentCoordinators = currentCollegeCoordinators.filter(
     (coord) => coord.is_current,
   );
 
@@ -918,7 +1666,7 @@ export default function CampusDB() {
                 <th>College</th>
                 <th>City</th>
                 <th>Course</th>
-                <th>TPO</th>
+                <th>Placement Coordinators</th>
                 <th>Strength</th>
                 <th>Status</th>
               </tr>
@@ -1014,7 +1762,7 @@ export default function CampusDB() {
         >
           <input
             className="search-box"
-            placeholder="Search college, city, TPO..."
+            placeholder="Search college, city, placement coordinators..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -1279,10 +2027,13 @@ export default function CampusDB() {
             onClick={(e) => e.stopPropagation()}
             className="panel"
             style={{
-              maxWidth: 640,
+              maxWidth: 680,
               width: "100%",
               maxHeight: "90vh",
-              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              padding: 0,
+              overflow: "hidden",
             }}
           >
             {/* POPUP HEADER */}
@@ -1292,7 +2043,9 @@ export default function CampusDB() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginBottom: 4,
+                padding: "16px 20px 12px 20px",
+                borderBottom: "1px solid var(--border-default, #e5e7eb)",
+                flexShrink: 0,
               }}
             >
               <div
@@ -1318,193 +2071,427 @@ export default function CampusDB() {
               </button>
             </div>
 
-            {/* COLLEGE FORM */}
-
-            <form
-              onSubmit={handleSaveCollege}
+            {/* SCROLLABLE BODY */}
+            <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 12,
-                marginTop: 16,
+                padding: "16px 20px",
+                overflowY: "auto",
+                flex: 1,
               }}
             >
-              <input
-                className="search-box"
-                placeholder="College name"
-                required
-                value={form.name}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    name: e.target.value,
-                  })
-                }
-              />
+              {/* COLLEGE FORM */}
 
-              <input
-                className="search-box"
-                placeholder="City"
-                value={form.city}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    city: e.target.value,
-                  })
-                }
-              />
-
-              {form.course === "Others" || (form.course && !courses.includes(form.course)) ? (
-                <input
-                  className="search-box"
-                  placeholder="Type course name"
-                  value={form.course === "Others" ? "" : form.course}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      course: e.target.value,
-                    })
-                  }
-                  autoFocus
-                />
-              ) : (
-                <select
-                  className="search-box"
-                  value={form.course}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      course: e.target.value,
-                    })
-                  }
-                >
-                  <option value="">— No course —</option>
-
-                  {courses
-                    .filter((c) => c !== "Unassigned" && c !== "All")
-                    .map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                </select>
-              )}
-
-              <input
-                className="search-box"
-                placeholder="TPO name"
-                value={form.tpo}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    tpo: e.target.value,
-                  })
-                }
-              />
-
-              <input
-                className="search-box"
-                placeholder="Website (https://...)"
-                value={form.website}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    website: e.target.value,
-                  })
-                }
-              />
-
-              <input
-                className="search-box"
-                placeholder="Strength"
-                type="number"
-                value={form.strength}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    strength: e.target.value,
-                  })
-                }
-              />
-
-              <input
-                className="search-box"
-                placeholder="Institution Type (e.g. Engineering)"
-                value={form.institution_type}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    institution_type: e.target.value,
-                  })
-                }
-              />
-
-              <input
-                className="search-box"
-                placeholder="Courses Available (comma separated)"
-                value={form.courses_available}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    courses_available: e.target.value,
-                  })
-                }
-              />
-
-              <input
-                className="search-box"
-                type="date"
-                value={form.last_contact}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    last_contact: e.target.value,
-                  })
-                }
-              />
-
-              <select
-                className="search-box"
-                value={form.status}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    status: e.target.value,
-                  })
-                }
-              >
-                <option value="Interested">Interested</option>
-
-                <option value="Follow-up Due">Follow-up Due</option>
-
-                <option value="Not Interested">Not Interested</option>
-              </select>
-
-              <div
+              <form
+                id="college-form"
+                onSubmit={handleSaveCollege}
                 style={{
-                  gridColumn: "1 / -1",
-                  display: "flex",
-                  gap: 10,
-                  marginTop: 8,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
                 }}
               >
-                <button className="btn-gold" type="submit" disabled={saving}>
-                  {saving
-                    ? "Saving…"
-                    : editingId
-                      ? "Update College"
-                      : "Save College"}
-                </button>
+                <div>
+                  <input
+                    id="college-name-input"
+                    className="search-box"
+                    placeholder="College name *"
+                    required
+                    value={form.name}
+                    style={formErrors.name ? { borderColor: "crimson", width: "100%" } : { width: "100%" }}
+                    onChange={(e) => {
+                      setForm({
+                        ...form,
+                        name: e.target.value,
+                      });
+                      if (formErrors.name) {
+                        setFormErrors((prev) => ({ ...prev, name: null }));
+                      }
+                    }}
+                  />
+                  {formErrors.name && (
+                    <div style={{ color: "crimson", fontSize: 11, marginTop: 3 }}>
+                      {formErrors.name}
+                    </div>
+                  )}
+                </div>
 
-                <button
-                  className="btn-outline"
-                  type="button"
-                  onClick={cancelForm}
+                <input
+                  className="search-box"
+                  placeholder="City"
+                  value={form.city}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      city: e.target.value,
+                    })
+                  }
+                />
+
+                {form.course === "Others" || (form.course && !courses.includes(form.course)) ? (
+                  <input
+                    className="search-box"
+                    placeholder="Type course name"
+                    value={form.course === "Others" ? "" : form.course}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        course: e.target.value,
+                      })
+                    }
+                    autoFocus
+                  />
+                ) : (
+                  <select
+                    className="search-box"
+                    value={form.course}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        course: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">— No course —</option>
+
+                    {courses
+                      .filter((c) => c !== "Unassigned" && c !== "All")
+                      .map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                  </select>
+                )}
+
+                {editingId && (
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        color: "var(--text-muted)",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Placement Coordinators (Active)
+                    </label>
+                    <input
+                      className="search-box"
+                      placeholder="No active placement coordinators"
+                      value={form.tpo || ""}
+                      readOnly
+                      title="Automatically synchronized from all active placement coordinators"
+                      style={{
+                        backgroundColor: "var(--bg-soft, #f8fafc)",
+                        color: "var(--text-secondary, #475569)",
+                        cursor: "default",
+                        width: "100%",
+                      }}
+                    />
+                  </div>
+                )}
+
+                <input
+                  className="search-box"
+                  placeholder="Website (https://...)"
+                  value={form.website}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      website: e.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  className="search-box"
+                  placeholder="Strength"
+                  type="number"
+                  value={form.strength}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      strength: e.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  className="search-box"
+                  placeholder="Institution Type (e.g. Engineering)"
+                  value={form.institution_type}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      institution_type: e.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  className="search-box"
+                  placeholder="Courses Available (comma separated)"
+                  value={form.courses_available}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      courses_available: e.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  className="search-box"
+                  type="date"
+                  value={form.last_contact}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      last_contact: e.target.value,
+                    })
+                  }
+                />
+
+                <select
+                  className="search-box"
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      status: e.target.value,
+                    })
+                  }
                 >
-                  Cancel
-                </button>
-              </div>
-            </form>
+                  <option value="Interested">Interested</option>
+
+                  <option value="Follow-up Due">Follow-up Due</option>
+
+                  <option value="Not Interested">Not Interested</option>
+                </select>
+
+                {!editingId && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                      marginTop: 4,
+                      paddingTop: 12,
+                      borderTop: "1px dashed var(--border-default, #e2e8f0)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 13,
+                            color: "var(--text-primary)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 3,
+                              height: 14,
+                              borderRadius: 3,
+                              background: "var(--primary, #7c3aed)",
+                              display: "inline-block",
+                            }}
+                          />
+                          Placement Coordinators
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                          Add one or more coordinators. All active coordinator names will be synchronized.
+                        </div>
+                      </div>
+                    </div>
+
+                    {newCoordinators.map((coord, idx) => (
+                      <div
+                        key={idx}
+                        id={`coordinator-card-${idx}`}
+                        style={{
+                          border: newCoordErrors[idx]
+                            ? "1px solid #f87171"
+                            : "1px solid var(--border-default, #e2e8f0)",
+                          borderRadius: 8,
+                          padding: "10px 12px",
+                          background: "var(--bg-soft, #f8fafc)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: "var(--text-primary)",
+                            }}
+                          >
+                            Placement Coordinator {idx + 1}
+                          </div>
+
+                          {newCoordinators.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCoordinatorField(idx)}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "crimson",
+                                fontSize: 11.5,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                padding: "2px 6px",
+                              }}
+                            >
+                              ✕ Remove coordinator
+                            </button>
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 8,
+                          }}
+                        >
+                          <div>
+                            <input
+                              id={`coord-name-${idx}`}
+                              className="search-box"
+                              placeholder="Placement Coordinator Name *"
+                              value={coord.name}
+                              style={newCoordErrors[idx]?.name ? { borderColor: "crimson", width: "100%" } : { width: "100%" }}
+                              onChange={(e) =>
+                                handleNewCoordinatorChange(
+                                  idx,
+                                  "name",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                            {newCoordErrors[idx]?.name && (
+                              <div style={{ color: "crimson", fontSize: 11, marginTop: 3 }}>
+                                {newCoordErrors[idx].name}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <input
+                              id={`coord-phone-${idx}`}
+                              className="search-box"
+                              placeholder="Contact Number *"
+                              value={coord.phone}
+                              style={newCoordErrors[idx]?.phone ? { borderColor: "crimson", width: "100%" } : { width: "100%" }}
+                              onChange={(e) =>
+                                handleNewCoordinatorChange(
+                                  idx,
+                                  "phone",
+                                  sanitizePhone(e.target.value),
+                                )
+                              }
+                              inputMode="numeric"
+                              maxLength={10}
+                            />
+                            {newCoordErrors[idx]?.phone && (
+                              <div style={{ color: "crimson", fontSize: 11, marginTop: 3 }}>
+                                {newCoordErrors[idx].phone}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <input
+                              id={`coord-email-${idx}`}
+                              className="search-box"
+                              placeholder="Email Address *"
+                              type="email"
+                              value={coord.email}
+                              style={newCoordErrors[idx]?.email ? { borderColor: "crimson", width: "100%" } : { width: "100%" }}
+                              onChange={(e) =>
+                                handleNewCoordinatorChange(
+                                  idx,
+                                  "email",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                            {newCoordErrors[idx]?.email && (
+                              <div style={{ color: "crimson", fontSize: 11, marginTop: 3 }}>
+                                {newCoordErrors[idx].email}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <input
+                              id={`coord-date-${idx}`}
+                              className="search-box"
+                              type="date"
+                              value={coord.effective_from}
+                              title="Effective From Date"
+                              placeholder="Effective From Date *"
+                              style={newCoordErrors[idx]?.effective_from ? { width: "100%", borderColor: "crimson" } : { width: "100%" }}
+                              onChange={(e) =>
+                                handleNewCoordinatorChange(
+                                  idx,
+                                  "effective_from",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                            {newCoordErrors[idx]?.effective_from && (
+                              <div style={{ color: "crimson", fontSize: 11, marginTop: 3 }}>
+                                {newCoordErrors[idx].effective_from}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div>
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        onClick={handleAddCoordinatorField}
+                        style={{
+                          fontSize: 12,
+                          padding: "5px 12px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontWeight: 600,
+                        }}
+                      >
+                        + Add Another Placement Coordinator
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </form>
 
             {/* ==================================================
                 PLACEMENT COORDINATORS
@@ -1525,7 +2512,9 @@ export default function CampusDB() {
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
-                    marginBottom: 10,
+                    marginBottom: 12,
+                    flexWrap: "wrap",
+                    gap: 8,
                   }}
                 >
                   <div>
@@ -1557,85 +2546,152 @@ export default function CampusDB() {
                         marginTop: 3,
                       }}
                     >
-                      Manage current and previous coordinators
+                      Manage current and previous coordinators with full change history
                     </div>
                   </div>
 
-                  {/* + ADD COORDINATOR */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      onClick={() => openHistoryModal(null)}
+                      title="View all coordinator change events for this college"
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
+                      <span>📜</span> Change History
+                    </button>
 
-                  <button
-                    type="button"
-                    className="btn-gold"
-                    onClick={openCoordinatorForm}
-                    style={{
-                      padding: "6px 12px",
-                      fontSize: 12,
-                    }}
-                  >
-                    + Add Coordinator
-                  </button>
+                    <button
+                      type="button"
+                      className="btn-gold"
+                      onClick={() => openCoordinatorForm(false)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                      }}
+                    >
+                      + Add Another Placement Coordinator
+                    </button>
+                  </div>
                 </div>
 
-                {/* ADD COORDINATOR FORM */}
+                {/* ADD / REPLACE COORDINATOR FORM */}
 
                 {showCoordinatorForm && (
                   <form
-                    onSubmit={handleAddCoordinator}
+                    onSubmit={handleAddOrReplaceCoordinator}
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 8,
-                      padding: 10,
-                      marginBottom: 12,
-                      border: "1px dashed var(--border-default, #ddd)",
-                      borderRadius: 8,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                      padding: 12,
+                      marginBottom: 14,
+                      border: "1px solid var(--border-default, #e2e8f0)",
+                      borderRadius: 10,
+                      background: "var(--bg-soft, #f8fafc)",
                     }}
                   >
-                    <input
-                      className="search-box"
-                      placeholder="Coordinator Name *"
-                      required
-                      value={coordForm.name}
-                      onChange={(e) =>
-                        setCoordForm({
-                          ...coordForm,
-                          name: e.target.value,
-                        })
-                      }
-                    />
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+                      {isReplacing && replacingTargetCoord ? (
+                        <div style={{ color: "#b45309", display: "flex", alignItems: "center", gap: 6 }}>
+                          <span>⚠️</span>
+                          <span>
+                            Appointing a replacement coordinator will archive{" "}
+                            <b>{replacingTargetCoord.name}</b> and preserve all history.
+                          </span>
+                        </div>
+                      ) : (
+                        "Add Placement Coordinator"
+                      )}
+                    </div>
 
-                    <input
-                      className="search-box"
-                      placeholder="Phone"
-                      value={coordForm.phone}
-                      onChange={(e) =>
-                        setCoordForm({
-                          ...coordForm,
-                          phone: sanitizePhone(e.target.value),
-                        })
-                      }
-                      inputMode="numeric"
-                      maxLength={10}
-                    />
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 8,
+                      }}
+                    >
+                      <input
+                        className="search-box"
+                        placeholder="Coordinator Full Name *"
+                        required
+                        value={coordForm.name}
+                        onChange={(e) =>
+                          setCoordForm({
+                            ...coordForm,
+                            name: e.target.value,
+                          })
+                        }
+                      />
 
-                    <input
-                      className="search-box"
-                      placeholder="Email"
-                      type="email"
-                      value={coordForm.email}
-                      onChange={(e) =>
-                        setCoordForm({
-                          ...coordForm,
-                          email: e.target.value,
-                        })
-                      }
-                    />
+                      <input
+                        className="search-box"
+                        placeholder="Mobile Number"
+                        value={coordForm.phone}
+                        onChange={(e) =>
+                          setCoordForm({
+                            ...coordForm,
+                            phone: sanitizePhone(e.target.value),
+                          })
+                        }
+                        inputMode="numeric"
+                        maxLength={10}
+                      />
+
+                      <input
+                        className="search-box"
+                        placeholder="Email Address"
+                        type="email"
+                        value={coordForm.email}
+                        onChange={(e) =>
+                          setCoordForm({
+                            ...coordForm,
+                            email: e.target.value,
+                          })
+                        }
+                      />
+
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            color: "var(--text-muted)",
+                            marginBottom: 2,
+                          }}
+                        >
+                          Effective-From Date *
+                        </label>
+                        <input
+                          className="search-box"
+                          type="date"
+                          required
+                          value={coordForm.effective_from}
+                          onChange={(e) =>
+                            setCoordForm({
+                              ...coordForm,
+                              effective_from: e.target.value,
+                            })
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </div>
+                    </div>
 
                     <div
                       style={{
                         display: "flex",
-                        gap: 6,
+                        gap: 8,
                         alignItems: "center",
+                        marginTop: 4,
                       }}
                     >
                       <button
@@ -1643,11 +2699,15 @@ export default function CampusDB() {
                         type="submit"
                         disabled={savingCoord}
                         style={{
-                          padding: "6px 12px",
+                          padding: "6px 14px",
                           fontSize: 12,
                         }}
                       >
-                        {savingCoord ? "Saving…" : "Save Coordinator"}
+                        {savingCoord
+                          ? "Saving…"
+                          : isReplacing
+                            ? "Confirm Replacement"
+                            : "Save Coordinator"}
                       </button>
 
                       <button
@@ -1679,102 +2739,190 @@ export default function CampusDB() {
                   </div>
                 ) : (
                   <>
-                    {currentCoordinator && (
+                    {currentCoordinators.length > 0 ? (
                       <div
                         style={{
-                          padding: "10px 12px",
-                          borderRadius: 8,
-                          background: "var(--bg-soft, #FAFAFC)",
-                          border: "1px solid var(--border-default, #eee)",
-                          marginBottom: 10,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                          marginBottom: 12,
                         }}
                       >
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            fontWeight: 700,
-                            color: "var(--text-muted)",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.04em",
-                            marginBottom: 4,
-                          }}
-                        >
-                          Current Coordinator
-                        </div>
-
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 10,
-                          }}
-                        >
-                          <div>
+                        {currentCoordinators.map((coord, idx) => (
+                          <div
+                            key={coord.id}
+                            style={{
+                              padding: "12px 14px",
+                              borderRadius: 10,
+                              background: "var(--bg-soft, #FAFAFC)",
+                              border: "1px solid var(--border-default, #e2e8f0)",
+                            }}
+                          >
                             <div
                               style={{
-                                fontWeight: 700,
-                                fontSize: 13,
+                                display: "flex",
+                                justifySpace: "space-between",
+                                justifyContent: "space-between",
+                                alignItems: "flex-start",
+                                gap: 10,
                               }}
                             >
-                              {currentCoordinator.name}
+                              <div>
+                                <div
+                                  style={{
+                                    fontSize: 10.5,
+                                    fontWeight: 700,
+                                    color: "var(--text-muted)",
+                                    textTransform: "uppercase",
+                                    letterSpacing: "0.04em",
+                                    marginBottom: 3,
+                                  }}
+                                >
+                                  {currentCoordinators.length > 1
+                                    ? `Placement Coordinator ${idx + 1}`
+                                    : "Current Placement Coordinator"}
+                                </div>
+
+                                <div
+                                  style={{
+                                    fontWeight: 700,
+                                    fontSize: 14,
+                                    color: "var(--text-primary)",
+                                  }}
+                                >
+                                  {coord.name}
+                                </div>
+
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    color: "var(--text-secondary)",
+                                    marginTop: 3,
+                                    display: "flex",
+                                    flexWrap: "wrap",
+                                    gap: "6px 12px",
+                                  }}
+                                >
+                                  {coord.phone && (
+                                    <span>📞 {coord.phone}</span>
+                                  )}
+                                  {coord.email && (
+                                    <span>✉️ {coord.email}</span>
+                                  )}
+                                  {!coord.phone && !coord.email && (
+                                    <span>No contact details recorded</span>
+                                  )}
+                                </div>
+
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: "var(--text-muted)",
+                                    marginTop: 6,
+                                    display: "flex",
+                                    flexWrap: "wrap",
+                                    gap: "4px 12px",
+                                  }}
+                                >
+                                  <span>
+                                    <b>Effective from:</b> {formatDate(coord.effective_from)}
+                                  </span>
+                                  <span>
+                                    <b>Last updated:</b>{" "}
+                                    {formatDateTime(coord.updated_at || coord.created_at)}
+                                    {coord.updated_by_name || coord.created_by_name
+                                      ? ` by ${coord.updated_by_name || coord.created_by_name}`
+                                      : ""}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <span className="badge green" style={{ flexShrink: 0 }}>
+                                Current
+                              </span>
                             </div>
 
                             <div
                               style={{
-                                fontSize: 11.5,
-                                color: "var(--text-secondary)",
-                                marginTop: 3,
+                                display: "flex",
+                                gap: 6,
+                                marginTop: 10,
+                                flexWrap: "wrap",
                               }}
                             >
-                              {[
-                                currentCoordinator.phone,
-                                currentCoordinator.email,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ") || "—"}
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{
+                                  padding: "4px 10px",
+                                  fontSize: 11.5,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                }}
+                                onClick={() => openEditCoordinatorModal(coord)}
+                              >
+                                <span>✏️</span> Edit Details
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{
+                                  padding: "4px 10px",
+                                  fontSize: 11.5,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                }}
+                                onClick={() => openCoordinatorForm(true, coord)}
+                              >
+                                <span>🔄</span> Replace
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{
+                                  padding: "4px 10px",
+                                  fontSize: 11.5,
+                                  color: "#b45309",
+                                }}
+                                onClick={() => handleRetireCoordinator(coord)}
+                              >
+                                Mark as Left
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{
+                                  padding: "4px 10px",
+                                  fontSize: 11.5,
+                                  marginLeft: "auto",
+                                }}
+                                onClick={() => openHistoryModal(coord.id)}
+                              >
+                                📜 History
+                              </button>
                             </div>
                           </div>
-
-                          <span className="badge green">Current</span>
-                        </div>
-
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 6,
-                            marginTop: 8,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="btn-outline"
-                            style={{
-                              padding: "4px 10px",
-                              fontSize: 11.5,
-                            }}
-                            onClick={() =>
-                              handleRetireCoordinator(currentCoordinator)
-                            }
-                          >
-                            Mark as Left
-                          </button>
-
-                          <button
-                            type="button"
-                            className="btn-outline"
-                            style={{
-                              padding: "4px 10px",
-                              fontSize: 11.5,
-                              color: "crimson",
-                            }}
-                            onClick={() =>
-                              handleDeleteCoordinator(currentCoordinator)
-                            }
-                          >
-                            Delete
-                          </button>
-                        </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          padding: "12px 14px",
+                          borderRadius: 8,
+                          background: "var(--bg-soft, #FAFAFC)",
+                          border: "1px dashed var(--border-default, #ddd)",
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          marginBottom: 10,
+                          textAlign: "center",
+                        }}
+                      >
+                        No active placement coordinator assigned to this college yet.
                       </div>
                     )}
 
@@ -1783,7 +2931,7 @@ export default function CampusDB() {
                     {pastCoordinators.length > 0 && (
                       <div
                         style={{
-                          marginTop: 10,
+                          marginTop: 14,
                         }}
                       >
                         <div
@@ -1793,43 +2941,43 @@ export default function CampusDB() {
                             color: "var(--text-muted)",
                             textTransform: "uppercase",
                             letterSpacing: "0.04em",
-                            marginBottom: 7,
+                            marginBottom: 8,
                           }}
                         >
-                          Previous Coordinators
+                          Previous Coordinators ({pastCoordinators.length})
                         </div>
 
                         <div
                           style={{
                             display: "flex",
                             flexDirection: "column",
-                            gap: 6,
+                            gap: 8,
                           }}
                         >
                           {pastCoordinators.map((coord) => (
                             <div
                               key={coord.id}
                               style={{
-                                padding: "8px 10px",
-                                borderLeft:
-                                  "2px solid var(--border-default, #ddd)",
+                                padding: "10px 12px",
+                                borderLeft: "3px solid #94a3b8",
                                 background: "var(--bg-soft, #FAFAFC)",
-                                opacity: 0.75,
+                                borderRadius: "0 8px 8px 0",
                               }}
                             >
                               <div
                                 style={{
                                   display: "flex",
                                   justifyContent: "space-between",
-                                  alignItems: "center",
+                                  alignItems: "flex-start",
                                   gap: 10,
                                 }}
                               >
                                 <div>
                                   <div
                                     style={{
-                                      fontSize: 12.5,
+                                      fontSize: 13,
                                       fontWeight: 600,
+                                      color: "var(--text-primary)",
                                     }}
                                   >
                                     {coord.name}
@@ -1842,32 +2990,39 @@ export default function CampusDB() {
                                       marginTop: 2,
                                     }}
                                   >
-                                    {[coord.phone, coord.email]
+                                    {[coord.phone && `📞 ${coord.phone}`, coord.email && `✉️ ${coord.email}`]
                                       .filter(Boolean)
-                                      .join(" · ") || "—"}
+                                      .join(" · ") || "No contact info"}
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      fontSize: 10.5,
+                                      color: "var(--text-muted)",
+                                      marginTop: 4,
+                                    }}
+                                  >
+                                    <b>Tenure:</b> {formatDate(coord.effective_from)} —{" "}
+                                    {coord.ended_at ? formatDate(coord.ended_at) : "Ended"}
                                   </div>
                                 </div>
 
-                                <span className="badge gray">Past</span>
-                              </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span className="badge gray">Past</span>
 
-                              <div
-                                style={{
-                                  marginTop: 6,
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  className="btn-outline"
-                                  style={{
-                                    padding: "3px 8px",
-                                    fontSize: 11,
-                                    color: "crimson",
-                                  }}
-                                  onClick={() => handleDeleteCoordinator(coord)}
-                                >
-                                  Delete
-                                </button>
+                                  <button
+                                    type="button"
+                                    className="btn-outline"
+                                    style={{
+                                      padding: "3px 8px",
+                                      fontSize: 11,
+                                    }}
+                                    onClick={() => openHistoryModal(coord.id)}
+                                    title="View change history for this coordinator"
+                                  >
+                                    📜 History
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -1876,8 +3031,489 @@ export default function CampusDB() {
                     )}
                   </>
                 )}
+
+                {/* EDIT COORDINATOR MODAL */}
+
+                {editingCoord && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.55)",
+                      zIndex: 1050,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 16,
+                    }}
+                    onClick={cancelEditCoordinatorModal}
+                  >
+                    <div
+                      className="panel"
+                      style={{
+                        maxWidth: 480,
+                        width: "100%",
+                        background: "#fff",
+                        borderRadius: 12,
+                        padding: 20,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 12,
+                        }}
+                      >
+                        <div>
+                          <div className="panel-title" style={{ margin: 0 }}>
+                            Edit Coordinator Details
+                          </div>
+                          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                            {editingCoord.name} ({editingCoord.is_current ? "Current" : "Past"})
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={cancelEditCoordinatorModal}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            fontSize: 20,
+                            cursor: "pointer",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <form
+                        onSubmit={handleUpdateCoordinatorDetails}
+                        style={{ display: "flex", flexDirection: "column", gap: 10 }}
+                      >
+                        <div>
+                          <label
+                            style={{
+                              display: "block",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "var(--text-muted)",
+                              marginBottom: 3,
+                            }}
+                          >
+                            Coordinator Name *
+                          </label>
+                          <input
+                            className="search-box"
+                            placeholder="Full Name"
+                            required
+                            value={editCoordForm.name}
+                            onChange={(e) =>
+                              setEditCoordForm({
+                                ...editCoordForm,
+                                name: e.target.value,
+                              })
+                            }
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                          <div>
+                            <label
+                              style={{
+                                display: "block",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "var(--text-muted)",
+                                marginBottom: 3,
+                              }}
+                            >
+                              Mobile Number
+                            </label>
+                            <input
+                              className="search-box"
+                              placeholder="Mobile"
+                              value={editCoordForm.phone}
+                              onChange={(e) =>
+                                setEditCoordForm({
+                                  ...editCoordForm,
+                                  phone: sanitizePhone(e.target.value),
+                                })
+                              }
+                              inputMode="numeric"
+                              maxLength={10}
+                              style={{ width: "100%" }}
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              style={{
+                                display: "block",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "var(--text-muted)",
+                                marginBottom: 3,
+                              }}
+                            >
+                              Effective-From Date
+                            </label>
+                            <input
+                              className="search-box"
+                              type="date"
+                              value={editCoordForm.effective_from}
+                              onChange={(e) =>
+                                setEditCoordForm({
+                                  ...editCoordForm,
+                                  effective_from: e.target.value,
+                                })
+                              }
+                              style={{ width: "100%" }}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label
+                            style={{
+                              display: "block",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "var(--text-muted)",
+                              marginBottom: 3,
+                            }}
+                          >
+                            Email Address
+                          </label>
+                          <input
+                            className="search-box"
+                            type="email"
+                            placeholder="Email"
+                            value={editCoordForm.email}
+                            onChange={(e) =>
+                              setEditCoordForm({
+                                ...editCoordForm,
+                                email: e.target.value,
+                              })
+                            }
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                          ℹ️ All edits to name, phone, email, and effective date are preserved in the permanent change history.
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            marginTop: 10,
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={cancelEditCoordinatorModal}
+                            disabled={savingEditCoord}
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="submit"
+                            className="btn-gold"
+                            disabled={savingEditCoord}
+                          >
+                            {savingEditCoord ? "Saving…" : "Save Changes"}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+
+                {/* AUDIT HISTORY MODAL */}
+
+                {showHistoryModal && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      background: "rgba(0,0,0,0.6)",
+                      zIndex: 1100,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 16,
+                    }}
+                    onClick={closeHistoryModal}
+                  >
+                    <div
+                      className="panel"
+                      style={{
+                        maxWidth: 620,
+                        width: "100%",
+                        maxHeight: "85vh",
+                        overflowY: "auto",
+                        background: "#fff",
+                        borderRadius: 14,
+                        padding: 22,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          marginBottom: 16,
+                          borderBottom: "1px solid var(--border-default, #eee)",
+                          paddingBottom: 10,
+                        }}
+                      >
+                        <div>
+                          <div className="panel-title" style={{ margin: 0, fontSize: 16 }}>
+                            📜 Placement Coordinator History
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
+                            {form.name} — complete chronological record of all changes
+                          </div>
+                          {selectedHistoryCoordId && (
+                            <div style={{ marginTop: 6 }}>
+                              <button
+                                type="button"
+                                className="btn-outline"
+                                style={{ fontSize: 11, padding: "2px 8px" }}
+                                onClick={() => openHistoryModal(null)}
+                              >
+                                Filtered by coordinator ✕ Show All
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={closeHistoryModal}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            fontSize: 22,
+                            cursor: "pointer",
+                            color: "var(--text-muted)",
+                            lineHeight: 1,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {historyLoading ? (
+                        <div style={{ textAlign: "center", padding: 24, color: "var(--text-muted)" }}>
+                          Loading history entries…
+                        </div>
+                      ) : historyList.length === 0 ? (
+                        <div
+                          style={{
+                            textAlign: "center",
+                            padding: 32,
+                            color: "var(--text-muted)",
+                            background: "var(--bg-soft, #f8fafc)",
+                            borderRadius: 10,
+                            fontSize: 13,
+                          }}
+                        >
+                          No history events recorded yet for this college.
+                          <div style={{ fontSize: 11.5, marginTop: 4 }}>
+                            Changes made to coordinators will automatically appear here with exact timestamps and author details.
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {historyList.map((item) => {
+                            const badgeClass =
+                              item.action === "CREATED"
+                                ? "green"
+                                : item.action === "UPDATED"
+                                  ? "blue"
+                                  : item.action === "REPLACED"
+                                    ? "gold"
+                                    : "gray";
+
+                            const prev = item.previous_values || {};
+                            const next = item.new_values || {};
+
+                            return (
+                              <div
+                                key={item.id}
+                                style={{
+                                  padding: "12px 14px",
+                                  borderRadius: 10,
+                                  background: "var(--bg-soft, #f8fafc)",
+                                  border: "1px solid var(--border-default, #e2e8f0)",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    marginBottom: 6,
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span className={`badge ${badgeClass}`}>
+                                      {item.action}
+                                    </span>
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                                      {item.changed_by_name || item.changed_by_email || "Authorized User"}
+                                    </span>
+                                  </div>
+
+                                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                                    {formatDateTime(item.changed_at)}
+                                  </span>
+                                </div>
+
+                                {/* FIELD LEVEL DIFF DETAILS */}
+                                {item.action === "UPDATED" && (
+                                  <div
+                                    style={{
+                                      fontSize: 12,
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: 3,
+                                      marginTop: 6,
+                                      paddingLeft: 8,
+                                      borderLeft: "2px solid #3b82f6",
+                                    }}
+                                  >
+                                    {prev.name !== next.name && (
+                                      <div>
+                                        <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>Name:</span>{" "}
+                                        <span style={{ textDecoration: "line-through", color: "#64748b" }}>
+                                          {prev.name || "—"}
+                                        </span>{" "}
+                                        → <span style={{ fontWeight: 600, color: "#0f172a" }}>{next.name}</span>
+                                      </div>
+                                    )}
+
+                                    {prev.phone !== next.phone && (
+                                      <div>
+                                        <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>Phone:</span>{" "}
+                                        <span style={{ textDecoration: "line-through", color: "#64748b" }}>
+                                          {prev.phone || "—"}
+                                        </span>{" "}
+                                        → <span style={{ fontWeight: 600, color: "#0f172a" }}>{next.phone || "—"}</span>
+                                      </div>
+                                    )}
+
+                                    {prev.email !== next.email && (
+                                      <div>
+                                        <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>Email:</span>{" "}
+                                        <span style={{ textDecoration: "line-through", color: "#64748b" }}>
+                                          {prev.email || "—"}
+                                        </span>{" "}
+                                        → <span style={{ fontWeight: 600, color: "#0f172a" }}>{next.email || "—"}</span>
+                                      </div>
+                                    )}
+
+                                    {prev.effective_from !== next.effective_from && (
+                                      <div>
+                                        <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>Effective From:</span>{" "}
+                                        <span style={{ textDecoration: "line-through", color: "#64748b" }}>
+                                          {formatDate(prev.effective_from)}
+                                        </span>{" "}
+                                        → <span style={{ fontWeight: 600, color: "#0f172a" }}>{formatDate(next.effective_from)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {item.action === "CREATED" && (
+                                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                                    Appointed coordinator <b>{next.name}</b>
+                                    {next.phone ? ` (Phone: ${next.phone})` : ""}
+                                    {next.email ? ` (Email: ${next.email})` : ""}
+                                    {next.effective_from ? ` starting ${formatDate(next.effective_from)}` : ""}.
+                                  </div>
+                                )}
+
+                                {item.action === "REPLACED" && (
+                                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                                    Coordinator <b>{prev.name}</b> was retired and replaced
+                                    {next.replaced_by ? (
+                                      <span> by <b>{next.replaced_by}</b></span>
+                                    ) : (
+                                      ""
+                                    )}.
+                                  </div>
+                                )}
+
+                                {item.action === "RETIRED" && (
+                                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                                    Coordinator <b>{prev.name || "Coordinator"}</b> marked as left / role ended.
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                        <button type="button" className="btn-outline" onClick={closeHistoryModal}>
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+            </div>
+
+            {/* STICKY FOOTER ACTIONS */}
+            <div
+              style={{
+                padding: "12px 20px",
+                borderTop: "1px solid var(--border-default, #e5e7eb)",
+                background: "var(--bg-panel, #ffffff)",
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexShrink: 0,
+                zIndex: 10,
+              }}
+            >
+              <button
+                className="btn-gold"
+                type="submit"
+                form="college-form"
+                disabled={saving}
+              >
+                {saving
+                  ? "Saving…"
+                  : editingId
+                    ? "Update College"
+                    : "Save College"}
+              </button>
+
+              <button
+                className="btn-outline"
+                type="button"
+                onClick={cancelForm}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
