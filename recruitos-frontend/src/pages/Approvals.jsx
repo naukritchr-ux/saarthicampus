@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { openSecureDocument } from "../lib/api";
+import CandidateAvatar from "../components/CandidateAvatar";
 
 export default function Approvals() {
   const [candidates, setCandidates] = useState([]);
@@ -291,9 +293,21 @@ export default function Approvals() {
                     <td>{app.resume_score ?? "—"}</td>
                     <td>
                       {app.candidates?.resume_url ? (
-                        <a href={app.candidates.resume_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary)" }}>
+                        <button
+                          type="button"
+                          onClick={() => openSecureDocument(app.candidates.resume_url)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            color: "var(--primary)",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            font: "inherit",
+                          }}
+                        >
                           View
-                        </a>
+                        </button>
                       ) : (
                         "—"
                       )}
@@ -348,11 +362,11 @@ export default function Approvals() {
             </div>
 
             <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 16 }}>
-              {selectedApp.candidates?.photo_url ? (
-                <img src={selectedApp.candidates.photo_url} alt="" style={{ width: 60, height: 60, borderRadius: "50%", objectFit: "cover" }} />
-              ) : (
-                <div style={{ width: 60, height: 60, borderRadius: "50%", background: "#eee" }} />
-              )}
+              <CandidateAvatar
+                photoUrl={selectedApp.candidates?.photo_url}
+                name={selectedApp.candidates?.name}
+                size={60}
+              />
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16 }}>{selectedApp.candidates?.name}</div>
                 <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{selectedApp.candidates?.email}</div>
@@ -380,9 +394,14 @@ export default function Approvals() {
 
             {selectedApp.candidates?.resume_url && (
               <div style={{ marginTop: 14 }}>
-                <a href={selectedApp.candidates.resume_url} target="_blank" rel="noreferrer" className="btn-outline" style={{ display: "inline-block", padding: "6px 14px", fontSize: 12.5, textDecoration: "none" }}>
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() => openSecureDocument(selectedApp.candidates.resume_url)}
+                  style={{ display: "inline-block", padding: "6px 14px", fontSize: 12.5, cursor: "pointer" }}
+                >
                   View Resume
-                </a>
+                </button>
               </div>
             )}
 

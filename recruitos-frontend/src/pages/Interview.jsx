@@ -64,15 +64,26 @@ export default function Interview() {
     }
   }
 
-  function copyInterviewLink(app) {
+  async function copyInterviewLink(app) {
     const candId = app.candidates?.id;
     const jobId = app.job_profiles?.id;
     if (!candId || !jobId) return;
-    const link = `${window.location.origin}/interview/${candId}/${jobId}`;
-    navigator.clipboard.writeText(link).then(() => {
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/ai-interview/send-invite`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ candidate_id: candId, job_id: jobId, sendEmail: false }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not generate interview link');
+      const link = data.interviewLink || `${window.location.origin}/interview/${data.token}`;
+      await navigator.clipboard.writeText(link);
       setCopiedId(app.id);
       setTimeout(() => setCopiedId(null), 2000);
-    });
+    } catch (err) {
+      alert('Could not copy interview link: ' + err.message);
+    }
   }
 
   async function sendInterviewEmail(app) {

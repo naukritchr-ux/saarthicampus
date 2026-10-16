@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { updateApplicationScore } from "../lib/api";
+import { updateApplicationScore, openSecureDocument } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
 import TalentPassport from "./TalentPassport";
 
@@ -341,7 +341,7 @@ export default function Resume() {
                         style={{ padding: "7px 12px", fontSize: 12.5 }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(candidate.resume_url, "_blank");
+                          openSecureDocument(candidate.resume_url);
                         }}
                       >
                         📎 Resume

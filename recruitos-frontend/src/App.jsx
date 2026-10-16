@@ -18,7 +18,7 @@ import GDAdmin from "./pages/GDAdmin";
 import GDRoom from "./pages/GDRoom";
 import AIInterview from "./pages/AIInterview";
 import ThemeToggle from "./components/ThemeToggle";
-import AptitudeTest from "./pages/Aptitude";
+import AptitudeTest from "./pages/AptitudeTest";
 import UserManagement from "./pages/UserManagement";
 import AuthPanel from "./components/AuthPanel";
 import CallRecord from "./pages/CallRecord";

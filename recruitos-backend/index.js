@@ -20,6 +20,7 @@ const aptitudeRoutes = require("./aptitudeRoutes");
 const { createGDRoom, createMeetingToken } = require("./dailyService");
 const jdRoutes = require("./jdRoutes");
 const { moveApplicationStage } = require("./pipelineSync");
+const { parseStorageUrl, matchesStorageObject } = require("./storageHelpers");
 const multer = require("multer");
 const XLSX = require("xlsx");
 // NOTE: pdf-parse is now lazy-loaded (required inside the routes that need it)
@@ -256,6 +257,279 @@ app.get("/api/resume/analyzed", requireStaff, async (req, res) => {
   }));
 
   res.json(flat);
+});
+
+// ---- SECURE DOCUMENTS & STORAGE ----
+app.get("/api/documents/signed-url", requireAuth, async (req, res) => {
+  try {
+    const { bucket, path: rawPath, url } = req.query;
+
+    const parsed = parseStorageUrl(url || rawPath, bucket);
+    if (!parsed) {
+      return res.status(400).json({ error: "Invalid, unsupported, or malformed storage URL or path" });
+    }
+    const { bucket: targetBucket, path: sanitizedPath } = parsed;
+
+    const profile = req.userProfile;
+    if (!profile) {
+      return res.status(401).json({ error: "User profile not found" });
+    }
+
+    // Admins and recruiters have full operational access to student documents
+    if (profile.role === "admin" || profile.role === "recruiter") {
+      const { data: signedData, error: signErr } = await supabase.storage
+        .from(targetBucket)
+        .createSignedUrl(sanitizedPath, 60 * 15);
+
+      if (signErr || !signedData?.signedUrl) {
+        return res.status(404).json({ error: "Document not found or could not generate signed URL" });
+      }
+      return res.json({ signedUrl: signedData.signedUrl });
+    }
+
+    // Corporate users can only view documents of candidates who applied to their jobs or are saved
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "No company associated with corporate account" });
+      }
+
+      let authorized = false;
+
+      // 1. If candidate-documents, filename convention starts with `${applicationId}_`
+      const appIdMatch = sanitizedPath.match(/^([0-9a-fA-F-]+)_/);
+      if (appIdMatch && targetBucket.toLowerCase() === "candidate-documents") {
+        const appId = appIdMatch[1];
+        const { data: appRow } = await supabase
+          .from("applications")
+          .select("id, id_proof_url, marksheet_url, offer_letter_url, job_id, job_profiles!inner(company_id)")
+          .eq("id", appId)
+          .eq("job_profiles.company_id", profile.company_id)
+          .maybeSingle();
+
+        // Exact match check only — unsafe startsWith prefix wildcard is removed
+        if (appRow) {
+          if (
+            matchesStorageObject(appRow.id_proof_url, targetBucket, sanitizedPath) ||
+            matchesStorageObject(appRow.marksheet_url, targetBucket, sanitizedPath) ||
+            matchesStorageObject(appRow.offer_letter_url, targetBucket, sanitizedPath)
+          ) {
+            authorized = true;
+          }
+        }
+      }
+
+      // 2. Targeted lookup for candidate resumes & photos (no full-table scans, safely handles duplicates & special chars)
+      if (!authorized && targetBucket.toLowerCase() !== "candidate-documents") {
+        const escapedPath = sanitizedPath.replace(/[%_]/g, "\\$&");
+
+        // Find candidate records matching this filename/path in candidates table (handles duplicates safely)
+        const { data: matchingCands } = await supabase
+          .from("candidates")
+          .select("id, resume_url, photo_url")
+          .or(`resume_url.ilike.%${escapedPath}%,photo_url.ilike.%${escapedPath}%`);
+
+        const candidateIds = (matchingCands || [])
+          .filter((c) =>
+            matchesStorageObject(c.resume_url, targetBucket, sanitizedPath) ||
+            matchesStorageObject(c.photo_url, targetBucket, sanitizedPath)
+          )
+          .map((c) => c.id);
+
+        if (candidateIds.length > 0) {
+          // Check if ANY matching candidate applied to company's jobs (indexed lookup)
+          const { data: appMatches } = await supabase
+            .from("applications")
+            .select("id, job_profiles!inner(company_id)")
+            .in("candidate_id", candidateIds)
+            .eq("job_profiles.company_id", profile.company_id)
+            .limit(1);
+
+          if (appMatches && appMatches.length > 0) {
+            authorized = true;
+          } else {
+            // Check if ANY matching candidate is saved by the company (indexed lookup)
+            const { data: savedMatches } = await supabase
+              .from("saved_candidates")
+              .select("candidate_id")
+              .in("candidate_id", candidateIds)
+              .eq("company_id", profile.company_id)
+              .limit(1);
+
+            if (savedMatches && savedMatches.length > 0) {
+              authorized = true;
+            }
+          }
+        }
+      }
+
+      if (!authorized) {
+        return res.status(403).json({ error: "Access denied to requested candidate document" });
+      }
+
+      const { data: signedData, error: signErr } = await supabase.storage
+        .from(targetBucket)
+        .createSignedUrl(sanitizedPath, 60 * 15);
+
+      if (signErr || !signedData?.signedUrl) {
+        return res.status(404).json({ error: "Document not found or could not generate signed URL" });
+      }
+      return res.json({ signedUrl: signedData.signedUrl });
+    }
+
+    // Candidate / Student role can only access their own files
+    if (profile.role === "candidate" || profile.role === "student") {
+      let authorized = false;
+
+      // 1. Check candidate resume and photo (exact match)
+      const { data: cand } = await supabase
+        .from("candidates")
+        .select("id, resume_url, photo_url")
+        .eq("email", profile.email)
+        .maybeSingle();
+
+      if (
+        matchesStorageObject(cand?.resume_url, targetBucket, sanitizedPath) ||
+        matchesStorageObject(cand?.photo_url, targetBucket, sanitizedPath)
+      ) {
+        authorized = true;
+      }
+
+      // 2. Check candidate application documents (ID proof, marksheets, offer letters) (exact match)
+      const candidateId = cand?.id || profile.candidate_id;
+      if (!authorized && candidateId) {
+        const { data: myApps } = await supabase
+          .from("applications")
+          .select("id_proof_url, marksheet_url, offer_letter_url")
+          .eq("candidate_id", candidateId);
+
+        const appMatch = (myApps || []).some((a) => {
+          return (
+            matchesStorageObject(a.id_proof_url, targetBucket, sanitizedPath) ||
+            matchesStorageObject(a.marksheet_url, targetBucket, sanitizedPath) ||
+            matchesStorageObject(a.offer_letter_url, targetBucket, sanitizedPath)
+          );
+        });
+
+        if (appMatch) authorized = true;
+      }
+
+      if (authorized) {
+        const { data: signedData, error: signErr } = await supabase.storage
+          .from(targetBucket)
+          .createSignedUrl(sanitizedPath, 60 * 15);
+
+        if (signErr || !signedData?.signedUrl) {
+          return res.status(404).json({ error: "Document not found or could not generate signed URL" });
+        }
+        return res.json({ signedUrl: signedData.signedUrl });
+      }
+
+      return res.status(403).json({ error: "Access denied to document" });
+    }
+
+    return res.status(403).json({ error: "Role not authorized to access documents" });
+  } catch (err) {
+    console.error("Document signed-url error:", err);
+    res.status(500).json({ error: "Failed to process document request" });
+  }
+});
+
+// ---- UPDATE APPLICATION DOCUMENT (Secure Corporate / Staff upload) ----
+app.patch("/api/applications/:id/document", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { docKey, fileUrl } = req.body;
+
+    const ALLOWED_DOC_KEYS = ["id_proof", "marksheet", "offer_letter"];
+    if (!ALLOWED_DOC_KEYS.includes(docKey)) {
+      return res.status(400).json({ error: "Invalid document key" });
+    }
+
+    if (!fileUrl || typeof fileUrl !== "string") {
+      return res.status(400).json({ error: "fileUrl is required" });
+    }
+
+    const parsed = parseStorageUrl(fileUrl, "candidate-documents");
+    if (!parsed || parsed.bucket !== "candidate-documents") {
+      return res.status(400).json({ error: "Invalid candidate document URL or path" });
+    }
+
+    // Verify object belongs to the exact application and matches document convention:
+    // Format: ${appId}_${docKey}_${timestamp}_${safeName}
+    const expectedPrefix = `${id}_${docKey}_`;
+    if (!parsed.path.startsWith(expectedPrefix)) {
+      return res.status(400).json({
+        error: `Uploaded file does not belong to application ${id} for document type ${docKey}`,
+      });
+    }
+
+    const conventionRegex = new RegExp(`^${id}_${docKey}_\\d+_[a-zA-Z0-9._-]+$`);
+    if (!conventionRegex.test(parsed.path)) {
+      return res.status(400).json({
+        error: "Malformed document filename convention",
+      });
+    }
+
+    const profile = req.userProfile;
+    if (!profile) return res.status(401).json({ error: "User profile not found" });
+
+    // Candidates cannot update application documents via this corporate endpoint
+    if (profile.role === "candidate" || profile.role === "student") {
+      return res.status(403).json({ error: "Candidate role not authorized to update application documents" });
+    }
+
+    // Staff has full access to update application documents
+    if (profile.role === "admin" || profile.role === "recruiter") {
+      const { data, error } = await supabase
+        .from("applications")
+        .update({
+          [`${docKey}_url`]: fileUrl,
+          [`${docKey}_status`]: "Submitted",
+        })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true, application: data });
+    }
+
+    // Corporate users can only update applications for their company's jobs
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "No company associated with corporate account" });
+      }
+
+      const { data: appRow, error: appErr } = await supabase
+        .from("applications")
+        .select("id, job_id, job_profiles!inner(company_id)")
+        .eq("id", id)
+        .eq("job_profiles.company_id", profile.company_id)
+        .maybeSingle();
+
+      if (appErr || !appRow) {
+        return res.status(403).json({ error: "Access denied to application" });
+      }
+
+      const { data, error } = await supabase
+        .from("applications")
+        .update({
+          [`${docKey}_url`]: fileUrl,
+          [`${docKey}_status`]: "Submitted",
+        })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true, application: data });
+    }
+
+    return res.status(403).json({ error: "Role not authorized to update application documents" });
+  } catch (err) {
+    console.error("Update application document error:", err);
+    res.status(500).json({ error: "Failed to update application document" });
+  }
 });
 
 // ---- MARK CANDIDATE SELECTED → fires 3 emails automatically ----
@@ -1795,6 +2069,27 @@ app.get("/api/corporate/candidates/search", requireCorporate, async (req, res) =
   res.json(result);
 });
 
+// Lightweight per-company promise lock to serialize concurrent save requests within this process
+const companySaveLocks = new Map();
+
+function withCompanySaveLock(companyId, fn) {
+  const currentLock = companySaveLocks.get(companyId) || Promise.resolve();
+  let release;
+  const newLock = new Promise((resolve) => {
+    release = resolve;
+  });
+  companySaveLocks.set(companyId, newLock);
+
+  return currentLock
+    .then(fn)
+    .finally(() => {
+      release();
+      if (companySaveLocks.get(companyId) === newLock) {
+        companySaveLocks.delete(companyId);
+      }
+    });
+}
+
 // Corporate: save a candidate for later
 app.post("/api/corporate/candidates/:candidateId/save", requireCorporate, async (req, res) => {
   const profile = req.userProfile;
@@ -1802,15 +2097,142 @@ app.post("/api/corporate/candidates/:candidateId/save", requireCorporate, async 
     return res.status(403).json({ error: "Company association required" });
   }
 
-  const { error } = await supabase
-    .from("saved_candidates")
-    .upsert(
-      [{ company_id: profile.company_id, candidate_id: req.params.candidateId }],
-      { onConflict: "company_id,candidate_id" },
+  const { candidateId } = req.params;
+  if (!candidateId || typeof candidateId !== "string") {
+    return res.status(400).json({ error: "Candidate ID is required" });
+  }
+
+  // 1. Primary: Atomic PostgreSQL RPC function (multi-instance transaction locking via pg_advisory_xact_lock)
+  let missingRpc = false;
+  try {
+    const { data: rpcResult, error: rpcError } = await supabase.rpc(
+      "save_candidate_with_quota",
+      {
+        p_company_id: profile.company_id,
+        p_candidate_id: candidateId,
+        p_limit: 50,
+      }
     );
 
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ success: true });
+    if (rpcError) {
+      // Check if function is genuinely missing (e.g. migration not yet executed in database)
+      const isMissingRpc =
+        rpcError.code === "PGRST202" ||
+        (rpcError.message && /function.*save_candidate_with_quota.*does not exist/i.test(rpcError.message));
+
+      if (isMissingRpc) {
+        missingRpc = true;
+      } else {
+        // Fail closed for permission errors, timeouts, connection errors, and unexpected DB failures
+        console.error("save_candidate_with_quota database error:", rpcError);
+        return res.status(500).json({ error: "Failed to process candidate save due to database error" });
+      }
+    } else if (rpcResult && typeof rpcResult === "object") {
+      if (rpcResult.success) {
+        if (rpcResult.already_saved) {
+          return res.json({ success: true, alreadySaved: true });
+        }
+        return res.json({ success: true });
+      }
+
+      // Handle structured error responses from atomic database function
+      if (rpcResult.code === "NOT_FOUND") {
+        return res.status(404).json({ error: rpcResult.error || "Candidate not found" });
+      }
+      if (rpcResult.code === "LIMIT_EXCEEDED") {
+        return res.status(429).json({ error: rpcResult.error });
+      }
+      if (rpcResult.code === "FORBIDDEN") {
+        return res.status(403).json({ error: rpcResult.error });
+      }
+      return res.status(400).json({ error: rpcResult.error || "Failed to save candidate" });
+    } else {
+      // Malformed RPC response: fail closed
+      console.error("Malformed save_candidate_with_quota response:", rpcResult);
+      return res.status(500).json({ error: "Invalid response from candidate save service" });
+    }
+  } catch (err) {
+    // Fail closed on network or unhandled invocation exceptions
+    console.error("RPC invocation exception:", err.message);
+    return res.status(500).json({ error: "Unexpected error during candidate save" });
+  }
+
+  // 2. In-process fallback: only activated when the RPC function is genuinely missing
+  if (!missingRpc) {
+    return res.status(500).json({ error: "Failed to save candidate" });
+  }
+
+  // 2. In-process fallback: candidate existence check, local mutex, and database count
+  const { data: cand, error: candErr } = await supabase
+    .from("candidates")
+    .select("id")
+    .eq("id", candidateId)
+    .maybeSingle();
+
+  if (candErr || !cand) {
+    return res.status(404).json({ error: "Candidate not found" });
+  }
+
+  // Check if already saved (idempotent; does not consume quota)
+  const { data: existingSaved } = await supabase
+    .from("saved_candidates")
+    .select("candidate_id")
+    .eq("company_id", profile.company_id)
+    .eq("candidate_id", candidateId)
+    .maybeSingle();
+
+  if (existingSaved) {
+    return res.json({ success: true, alreadySaved: true });
+  }
+
+  // Serialize quota verification and insertion within this instance to prevent concurrency races
+  return withCompanySaveLock(profile.company_id, async () => {
+    // Re-check existing in case a concurrent request just saved this exact candidate
+    const { data: doubleCheck } = await supabase
+      .from("saved_candidates")
+      .select("candidate_id")
+      .eq("company_id", profile.company_id)
+      .eq("candidate_id", candidateId)
+      .maybeSingle();
+
+    if (doubleCheck) {
+      return res.json({ success: true, alreadySaved: true });
+    }
+
+    const DAILY_SAVE_LIMIT = 50;
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const { count, error: countErr } = await supabase
+      .from("saved_candidates")
+      .select("candidate_id", { count: "exact", head: true })
+      .eq("company_id", profile.company_id)
+      .gte("created_at", since);
+
+    if (countErr) {
+      return res.status(500).json({ error: "Failed to verify daily save limit" });
+    }
+
+    if ((count ?? 0) >= DAILY_SAVE_LIMIT) {
+      return res.status(429).json({
+        error: `Daily candidate save limit of ${DAILY_SAVE_LIMIT} reached. Contact campus support to expand your shortlisting quota.`,
+      });
+    }
+
+    // Save new candidate with current timestamp
+    const { error: insertErr } = await supabase
+      .from("saved_candidates")
+      .upsert(
+        [{
+          company_id: profile.company_id,
+          candidate_id: candidateId,
+          created_at: new Date().toISOString(),
+        }],
+        { onConflict: "company_id,candidate_id" },
+      );
+
+    if (insertErr) return res.status(500).json({ error: insertErr.message });
+    return res.json({ success: true });
+  });
 });
 
 // Corporate: unsave a candidate

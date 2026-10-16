@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as XLSX from "xlsx";
-import { getCandidates, uploadPhoto, uploadResume } from "../lib/api";
+import { getCandidates, uploadPhoto, uploadResume, openSecureDocument } from "../lib/api";
 import { sanitizePhone } from "../lib/phone";
 import { isValidEmail } from "../lib/email";
 import AIImport from "../components/AIImport";
+import CandidateAvatar from "../components/CandidateAvatar";
 
 const degrees = ["All", "B.Tech", "BCA", "B.Sc", "MBA", "MCA"];
 
@@ -472,15 +473,7 @@ export default function CandidateDB() {
                 filtered.map((c) => (
                   <tr key={c.id}>
                     <td>
-                      {c.photo_url ? (
-                        <img
-                          src={c.photo_url}
-                          alt={c.name}
-                          style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover" }}
-                        />
-                      ) : (
-                        <div style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--bg-soft, #eee)" }} />
-                      )}
+                      <CandidateAvatar photoUrl={c.photo_url} name={c.name} size={34} />
                     </td>
                     <td><strong>{c.name}</strong></td>
                     <td>{c.email}</td>
@@ -509,9 +502,22 @@ export default function CandidateDB() {
                     <td>{c.twelfth_percentage ?? "—"}</td>
                     <td>
                       {c.resume_url ? (
-                        <a href={c.resume_url} target="_blank" rel="noreferrer" style={{ color: "var(--primary)" }}>
+                        <button
+                          type="button"
+                          className="btn-link"
+                          onClick={() => openSecureDocument(c.resume_url)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            color: "var(--primary)",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            font: "inherit",
+                          }}
+                        >
                           View
-                        </a>
+                        </button>
                       ) : (
                         "—"
                       )}

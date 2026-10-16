@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import {
+  sanitizeFileName,
+  validateUploadFile,
+  getDocumentSignedUrl,
+  updateApplicationDocument,
+} from "../lib/api";
 
 const DOC_FIELDS = [
   { key: "id_proof", label: "ID Proof" },
@@ -92,14 +98,30 @@ export default function Documents() {
     };
   }, []);
 
+  async function handleOpenDoc(url) {
+    if (!url) return;
+    try {
+      const signedUrl = await getDocumentSignedUrl({ url });
+      window.open(signedUrl, "_blank", "noreferrer");
+    } catch {
+      window.open(url, "_blank", "noreferrer");
+    }
+  }
+
   async function handleFileUpload(appId, docKey, file) {
     if (!file) return;
     setUploadingKey(`${appId}-${docKey}`);
 
     try {
-      // eslint-disable-next-line react-hooks/purity
+      validateUploadFile(file, {
+        allowedTypes: ["application/pdf", "image/jpeg", "image/png"],
+        maxSize: 10 * 1024 * 1024,
+        typeLabel: "Document",
+      });
+
       const timestamp = Date.now();
-      const fileName = `${appId}_${docKey}_${timestamp}_${file.name}`;
+      const safeName = sanitizeFileName(file.name);
+      const fileName = `${appId}_${docKey}_${timestamp}_${safeName}`;
       const { error: uploadErr } = await supabase.storage
         .from("candidate-documents")
         .upload(fileName, file);
@@ -109,14 +131,7 @@ export default function Documents() {
         .from("candidate-documents")
         .getPublicUrl(fileName);
 
-      const { error: updateErr } = await supabase
-        .from("applications")
-        .update({
-          [`${docKey}_url`]: urlData.publicUrl,
-          [`${docKey}_status`]: "Submitted",
-        })
-        .eq("id", appId);
-      if (updateErr) throw updateErr;
+      await updateApplicationDocument(appId, docKey, urlData.publicUrl);
 
       await loadApprovedCandidates();
     } catch (err) {
@@ -240,14 +255,22 @@ export default function Documents() {
                     <td>{app.job_profiles?.title || "—"}</td>
                     <td>
                       {app.candidates?.resume_url ? (
-                        <a
-                          href={app.candidates.resume_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: "var(--primary)" }}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDoc(app.candidates.resume_url)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            color: "var(--primary)",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            font: "inherit",
+                            fontSize: 12,
+                          }}
                         >
                           View
-                        </a>
+                        </button>
                       ) : (
                         "—"
                       )}
@@ -270,17 +293,23 @@ export default function Documents() {
                             }}
                           >
                             {url ? (
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => handleOpenDoc(url)}
                                 style={{
-                                  fontSize: 11.5,
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
                                   color: "var(--primary)",
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                  textDecoration: "underline",
+                                  font: "inherit",
+                                  fontSize: 11.5,
                                 }}
                               >
                                 View File
-                              </a>
+                              </button>
                             ) : (
                               <span
                                 style={{

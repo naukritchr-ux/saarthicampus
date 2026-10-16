@@ -3,17 +3,51 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
+const { parseStorageUrl, validateFileBuffer } = require("./storageHelpers");
 
 async function analyzeResume(resumeUrl, jobSkills, applicationId) {
   try {
     console.log(`🔍 Starting analysis for application ${applicationId}`);
 
     const pdfParse = require('pdf-parse');
+    let buffer = null;
 
-    const response = await fetch(resumeUrl);
-    const buffer = await response.arrayBuffer();
-    const pdfData = await pdfParse(Buffer.from(buffer));
+    // 1. Try authorized Supabase Storage download (compatible with private and public buckets)
+    const parsed = parseStorageUrl(resumeUrl, 'resumes');
+    if (parsed) {
+      const { data: fileBlob, error: dlErr } = await supabase.storage
+        .from(parsed.bucket)
+        .download(parsed.path);
+
+      if (dlErr) {
+        throw new Error(`Storage download failed: ${dlErr.message}`);
+      }
+      buffer = Buffer.from(await fileBlob.arrayBuffer());
+    } else if (typeof resumeUrl === 'string' && (resumeUrl.startsWith('http://') || resumeUrl.startsWith('https://'))) {
+      // 2. Fallback to HTTP fetch for external URLs
+      const response = await fetch(resumeUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP download failed with status ${response.status}`);
+      }
+      buffer = Buffer.from(await response.arrayBuffer());
+    } else {
+      throw new Error('Unsupported or malformed resume URL');
+    }
+
+    // Validate buffer size (max 15MB) and enforce valid %PDF magic-bytes signature
+    const validation = validateFileBuffer(buffer, {
+      maxBytes: 15 * 1024 * 1024,
+      requirePdf: true,
+    });
+    if (!validation.valid) {
+      throw new Error(`Resume validation failed: ${validation.error}`);
+    }
+
+    const pdfData = await pdfParse(buffer);
     const resumeText = pdfData.text;
 
     console.log(`📄 PDF text extracted — ${resumeText.length} characters`);

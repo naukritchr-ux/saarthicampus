@@ -467,9 +467,33 @@ export async function deleteDrive(id) {
   if (error) throw error;
 }
 
-// ---------- Student Portal (public, no login required) ----------
+// ---------- Student Portal & Document Security ----------
+export function sanitizeFileName(name) {
+  if (!name || typeof name !== 'string') return 'file_' + Date.now();
+  const base = name.replace(/^.*[\\\/]/, '').replace(/\0/g, '');
+  const clean = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return clean.slice(-80) || 'file_' + Date.now();
+}
+
+export function validateUploadFile(file, { allowedTypes, maxSize, typeLabel = 'File' }) {
+  if (!file) throw new Error(`${typeLabel} is required`);
+  if (file.size > maxSize) {
+    const maxMb = Math.round(maxSize / (1024 * 1024));
+    throw new Error(`${typeLabel} size exceeds ${maxMb}MB limit`);
+  }
+  if (allowedTypes && allowedTypes.length > 0 && !allowedTypes.includes(file.type)) {
+    throw new Error(`Invalid file type for ${typeLabel.toLowerCase()}. Supported formats: ${allowedTypes.map((t) => t.split('/')[1] || t).join(', ')}`);
+  }
+}
+
 export async function uploadResume(file) {
-  const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+  validateUploadFile(file, {
+    allowedTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    maxSize: 5 * 1024 * 1024,
+    typeLabel: 'Resume',
+  });
+  const safeName = sanitizeFileName(file.name);
+  const fileName = `${Date.now()}_${safeName}`;
   const { error: uploadError } = await supabase.storage.from('resumes').upload(fileName, file);
   if (uploadError) throw uploadError;
   const { data } = supabase.storage.from('resumes').getPublicUrl(fileName);
@@ -477,11 +501,152 @@ export async function uploadResume(file) {
 }
 
 export async function uploadPhoto(file) {
-  const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+  validateUploadFile(file, {
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
+    maxSize: 2 * 1024 * 1024,
+    typeLabel: 'Photo',
+  });
+  const safeName = sanitizeFileName(file.name);
+  const fileName = `${Date.now()}_${safeName}`;
   const { error: uploadError } = await supabase.storage.from('candidate-photos').upload(fileName, file);
   if (uploadError) throw uploadError;
   const { data } = supabase.storage.from('candidate-photos').getPublicUrl(fileName);
   return data.publicUrl;
+}
+
+// In-memory cache for short-lived signed URLs to avoid re-fetching on every re-render
+const MAX_SIGNED_URL_CACHE_SIZE = 300;
+const signedUrlCache = new Map();
+
+/**
+ * Clears the in-memory signed URL cache. Called on sign-out and account changes.
+ */
+export function clearSignedUrlCache() {
+  signedUrlCache.clear();
+}
+
+// Automatically clear cached signed URLs on sign-out or session identity change
+if (typeof window !== 'undefined' && supabase?.auth?.onAuthStateChange) {
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+      clearSignedUrlCache();
+    }
+  });
+}
+
+export async function getDocumentSignedUrl({ bucket, path, url }) {
+  const headers = await authHeaders();
+  let query = '';
+  if (url) {
+    query = `url=${encodeURIComponent(url)}`;
+  } else if (bucket && path) {
+    query = `bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`;
+  } else {
+    throw new Error('Either url or bucket and path must be provided');
+  }
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/documents/signed-url?${query}`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to retrieve signed URL');
+  return data.signedUrl;
+}
+
+/**
+ * Returns a cached signed URL for viewing an image/document or fetches a new one.
+ * Avoids repeated network roundtrips on every component re-render.
+ * Includes authenticated user ID in cache key to isolate caches across different users.
+ * Fails closed (returns null) on error without falling back to raw public URL.
+ */
+export async function getCachedSignedUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+
+  let userId = 'anonymous';
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.user?.id) {
+      userId = data.session.user.id;
+    }
+  } catch {
+    // Treat as anonymous if session lookup fails
+  }
+
+  const cacheKey = `${userId}:${url}`;
+  const now = Date.now();
+  const cached = signedUrlCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.signedUrl;
+  }
+
+  try {
+    const signedUrl = await getDocumentSignedUrl({ url });
+
+    // Enforce cache size limit and prune expired entries
+    if (signedUrlCache.size >= MAX_SIGNED_URL_CACHE_SIZE) {
+      for (const [k, v] of signedUrlCache.entries()) {
+        if (v.expiresAt <= now) signedUrlCache.delete(k);
+      }
+      if (signedUrlCache.size >= MAX_SIGNED_URL_CACHE_SIZE) {
+        const oldestKey = signedUrlCache.keys().next().value;
+        if (oldestKey) signedUrlCache.delete(oldestKey);
+      }
+    }
+
+    // Cache for 10 minutes (backend signed URLs are valid for 15 minutes)
+    signedUrlCache.set(cacheKey, { signedUrl, expiresAt: now + 10 * 60 * 1000 });
+    return signedUrl;
+  } catch (err) {
+    console.warn('Could not retrieve secure document URL:', err.message || err);
+    return null; // Fail closed: do not fall back to raw URL
+  }
+}
+
+/**
+ * Opens a document (resume, marksheet, KYC) in a new tab securely using a short-lived signed URL.
+ * Fails closed if signed-URL generation fails (does NOT open raw public URL).
+ */
+export async function openSecureDocument(url) {
+  if (!url) return;
+  try {
+    const signedUrl = await getDocumentSignedUrl({ url });
+    window.open(signedUrl, '_blank', 'noreferrer');
+  } catch (err) {
+    console.error('Access denied or failed to retrieve secure document:', err);
+    alert('Unable to open document: access denied or file unavailable.');
+  }
+}
+
+/**
+ * Updates an application document via secure backend endpoint with fallback to direct Supabase client.
+ */
+export async function updateApplicationDocument(applicationId, docKey, fileUrl) {
+  try {
+    const headers = await authHeaders();
+    const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/applications/${applicationId}/document`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ docKey, fileUrl }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.application;
+    }
+  } catch (err) {
+    console.warn('Backend application document update failed, attempting direct Supabase fallback:', err);
+  }
+
+  // Fallback to direct Supabase update
+  const { data, error } = await supabase
+    .from('applications')
+    .update({
+      [`${docKey}_url`]: fileUrl,
+      [`${docKey}_status`]: 'Submitted',
+    })
+    .eq('id', applicationId);
+
+  if (error) throw error;
+  return data;
 }
 
 export async function createCandidate({
@@ -704,23 +869,25 @@ export async function getCorporateKpis() {
 }
 
 export async function saveCandidate(candidateId) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not logged in');
-  const { error } = await supabase
-    .from('saved_candidates')
-    .insert([{ company_user_id: user.id, candidate_id: candidateId }]);
-  if (error) throw error;
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/candidates/${candidateId}/save`, {
+    method: 'POST',
+    headers,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to save candidate');
+  return data;
 }
 
 export async function unsaveCandidate(candidateId) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not logged in');
-  const { error } = await supabase
-    .from('saved_candidates')
-    .delete()
-    .eq('company_user_id', user.id)
-    .eq('candidate_id', candidateId);
-  if (error) throw error;
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/candidates/${candidateId}/save`, {
+    method: 'DELETE',
+    headers,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to unsave candidate');
+  return data;
 }
 
 export async function searchCandidates(filters = {}) {
@@ -740,15 +907,23 @@ export async function searchCandidates(filters = {}) {
   const { data, error } = await query;
   if (error) throw error;
 
-  // Get saved candidate ids for the logged-in company user
+  // Get saved candidate ids for the logged-in company
   const { data: { user } } = await supabase.auth.getUser();
   let savedIds = new Set();
   if (user) {
-    const { data: saved } = await supabase
-      .from('saved_candidates')
-      .select('candidate_id')
-      .eq('company_user_id', user.id);
-    savedIds = new Set((saved || []).map((s) => s.candidate_id));
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profile?.company_id) {
+      const { data: saved } = await supabase
+        .from('saved_candidates')
+        .select('candidate_id')
+        .eq('company_id', profile.company_id);
+      savedIds = new Set((saved || []).map((s) => s.candidate_id));
+    }
   }
 
   let results = (data || []).map((c) => ({

@@ -3,6 +3,7 @@ import {
   searchCandidates,
   saveCandidate,
   unsaveCandidate,
+  openSecureDocument,
 } from "../lib/api";
 
 const emptyFilters = {
@@ -408,15 +409,14 @@ export default function CandidateSearch() {
               }}
             >
               {selectedCandidate.resume_url && (
-                <a
-                  href={selectedCandidate.resume_url}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => openSecureDocument(selectedCandidate.resume_url)}
                   className="btn-outline"
-                  style={{ textDecoration: "none", textAlign: "center" }}
+                  style={{ textAlign: "center", cursor: "pointer" }}
                 >
                   View Resume
-                </a>
+                </button>
               )}
 
               {selectedCandidate.email && (
