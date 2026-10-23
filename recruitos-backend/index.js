@@ -116,14 +116,269 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
   let query = supabase.from("job_profiles").select("*");
 
   if (profile?.role === "corporate") {
-    if (!profile.company_id) return res.json([]);
+    if (!profile.company_id) {
+      return res.status(403).json({
+        error: "Company association required. Please contact an admin to link your company.",
+      });
+    }
     query = query.eq("company_id", profile.company_id);
+  } else if (profile?.role === "candidate") {
+    return res.status(403).json({ error: "Not authorized" });
+  } else {
+    // Admin / recruiter can optionally filter by company_id
+    if (req.query.company_id) {
+      query = query.eq("company_id", req.query.company_id);
+    }
   }
 
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error });
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message || error });
   res.json(data);
 });
+
+app.post("/api/jobs", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+  try {
+    const profile = req.userProfile;
+    const {
+      title, location, salary_range, experience, skills,
+      job_summary, responsibilities, qualification, employment_type, reporting_to,
+    } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: "Job title is required" });
+    }
+
+    let targetCompanyId = null;
+    let targetCompanyName = null;
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "Company association required" });
+      }
+      targetCompanyId = profile.company_id;
+      const { data: comp } = await supabase
+        .from("companies")
+        .select("id, name")
+        .eq("id", targetCompanyId)
+        .maybeSingle();
+      targetCompanyName = comp?.name || "Corporate";
+    } else {
+      if (req.body.company_id) {
+        const { data: comp, error: compErr } = await supabase
+          .from("companies")
+          .select("id, name")
+          .eq("id", req.body.company_id)
+          .maybeSingle();
+        if (compErr || !comp) {
+          return res.status(400).json({ error: "Invalid company ID provided" });
+        }
+        targetCompanyId = comp.id;
+        targetCompanyName = comp.name;
+      } else {
+        targetCompanyName = (req.body.company || "Talent Corner").trim();
+      }
+    }
+
+    const skillsArray = Array.isArray(skills)
+      ? skills
+      : (skills || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+    const payload = {
+      title: title.trim(),
+      company: targetCompanyName,
+      company_id: targetCompanyId,
+      location: location || null,
+      salary_range: salary_range || null,
+      experience: experience || null,
+      skills: skillsArray,
+      job_summary: job_summary || null,
+      responsibilities: responsibilities || null,
+      qualification: qualification || null,
+      employment_type: employment_type || null,
+      reporting_to: reporting_to || null,
+    };
+
+    const { data, error } = await supabase
+      .from("job_profiles")
+      .insert([payload])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, job: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+  try {
+    const profile = req.userProfile;
+    const { id } = req.params;
+
+    const { data: existingJob, error: fetchErr } = await supabase
+      .from("job_profiles")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr || !existingJob) {
+      return res.status(404).json({ error: "Job profile not found" });
+    }
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id || existingJob.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot edit jobs belonging to another company" });
+      }
+    }
+
+    const updates = {};
+    const fields = [
+      "title", "location", "salary_range", "experience", "job_summary",
+      "responsibilities", "qualification", "employment_type", "reporting_to"
+    ];
+    for (const f of fields) {
+      if (req.body[f] !== undefined) updates[f] = req.body[f];
+    }
+    if (req.body.skills !== undefined) {
+      updates.skills = Array.isArray(req.body.skills)
+        ? req.body.skills
+        : (req.body.skills || "").split(",").map((s) => s.trim()).filter(Boolean);
+    }
+
+    if (profile.role === "admin" || profile.role === "recruiter") {
+      if (req.body.company_id !== undefined) {
+        if (req.body.company_id) {
+          const { data: comp, error: compErr } = await supabase
+            .from("companies")
+            .select("id, name")
+            .eq("id", req.body.company_id)
+            .maybeSingle();
+          if (compErr || !comp) {
+            return res.status(400).json({ error: "Invalid company ID provided" });
+          }
+          updates.company_id = comp.id;
+          updates.company = comp.name;
+        } else {
+          updates.company_id = null;
+          if (req.body.company) updates.company = req.body.company.trim();
+        }
+      } else if (req.body.company) {
+        updates.company = req.body.company.trim();
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("job_profiles")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, job: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+  try {
+    const profile = req.userProfile;
+    const { id } = req.params;
+
+    const { data: existingJob, error: fetchErr } = await supabase
+      .from("job_profiles")
+      .select("id, company_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr || !existingJob) {
+      return res.status(404).json({ error: "Job profile not found" });
+    }
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id || existingJob.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot delete jobs belonging to another company" });
+      }
+    }
+
+    const { error } = await supabase
+      .from("job_profiles")
+      .delete()
+      .eq("id", id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/jobs/bulk-import", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+  try {
+    const profile = req.userProfile;
+    const { rows } = req.body;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "rows array is required" });
+    }
+
+    let corpCompanyId = null;
+    let corpCompanyName = null;
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "Company association required" });
+      }
+      corpCompanyId = profile.company_id;
+      const { data: comp } = await supabase
+        .from("companies")
+        .select("id, name")
+        .eq("id", corpCompanyId)
+        .maybeSingle();
+      corpCompanyName = comp?.name || "Corporate";
+    }
+
+    const payload = [];
+    for (const row of rows) {
+      if (!row.title) continue;
+      const skillsArray = Array.isArray(row.skills)
+        ? row.skills
+        : (row.skills || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+      payload.push({
+        title: row.title,
+        company: corpCompanyName || row.company || "Talent Corner",
+        company_id: corpCompanyId || row.company_id || null,
+        location: row.location || null,
+        salary_range: row.salary_range || null,
+        experience: row.experience || null,
+        skills: skillsArray,
+        job_summary: row.job_summary || null,
+        responsibilities: row.responsibilities || null,
+        qualification: row.qualification || null,
+        employment_type: row.employment_type || null,
+        reporting_to: row.reporting_to || null,
+      });
+    }
+
+    if (payload.length === 0) {
+      return res.status(400).json({ error: "No valid job rows to import" });
+    }
+
+    const { data, error } = await supabase
+      .from("job_profiles")
+      .insert(payload)
+      .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, count: data.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 app.get("/api/my-applications", requireAuth, async (req, res) => {
   const profile = req.userProfile;
@@ -1115,7 +1370,7 @@ const { sendAdminApprovalNotification } = require("./emailService");
 
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
+    const { email, password, name, role, company_id } = req.body;
     if (!email || !password || !name) {
       return res
         .status(400)
@@ -1128,6 +1383,18 @@ app.post("/api/auth/register", async (req, res) => {
       ? role
       : "candidate";
     const autoApprove = finalRole === "candidate";
+
+    let targetCompanyId = null;
+    if (finalRole === "corporate" && company_id) {
+      const { data: comp } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("id", company_id)
+        .maybeSingle();
+      if (comp) {
+        targetCompanyId = comp.id;
+      }
+    }
 
     const { data: authData, error: authError } =
       await supabase.auth.admin.createUser({
@@ -1167,6 +1434,7 @@ app.post("/api/auth/register", async (req, res) => {
         role: finalRole,
         approved: autoApprove,
         candidate_id: candidateId,
+        company_id: targetCompanyId,
       },
     ]);
     if (profileError)
@@ -1204,17 +1472,34 @@ app.get("/api/auth/pending", requireAdmin, async (req, res) => {
 });
 
 // Admin: approve a user
-// Admin: approve a user
 app.post("/api/auth/approve/:userId", requireAdmin, async (req, res) => {
-  const { error } = await supabase
+  const { userId } = req.params;
+  const { company_id } = req.body || {};
+
+  const updates = { approved: true };
+
+  if (company_id) {
+    const { data: comp } = await supabase
+      .from("companies")
+      .select("id")
+      .eq("id", company_id)
+      .maybeSingle();
+    if (comp) {
+      updates.company_id = comp.id;
+    }
+  }
+
+  const { data, error } = await supabase
     .from("profiles")
-    .update({ approved: true })
-    .eq("id", req.params.userId);
+    .update(updates)
+    .eq("id", userId)
+    .select()
+    .single();
+
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ success: true });
+  res.json({ success: true, user: data });
 });
 
-// Admin: reject/delete a pending user
 // Admin: reject/delete a pending user
 app.post("/api/auth/reject/:userId", requireAdmin, async (req, res) => {
   const { userId } = req.params;
@@ -1227,11 +1512,11 @@ app.post("/api/auth/reject/:userId", requireAdmin, async (req, res) => {
 });
 
 // Admin: list all users (for User Management page) — merges profile data
-// with Supabase Auth's last_sign_in_at so the UI can show real activity.
+// with company details and Supabase Auth's last_sign_in_at.
 app.get("/api/auth/users", requireAdmin, async (req, res) => {
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select("*, companies!profiles_company_id_fkey(id, name)")
     .order("created_at", { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
 
@@ -1249,6 +1534,7 @@ app.get("/api/auth/users", requireAdmin, async (req, res) => {
 
   const merged = profiles.map((p) => ({
     ...p,
+    company_name: p.companies?.name || null,
     last_sign_in_at: authById[p.id] || null,
   }));
 
@@ -1257,11 +1543,32 @@ app.get("/api/auth/users", requireAdmin, async (req, res) => {
 
 // Admin: directly create a new user (auto-approved, no sign-up flow needed)
 app.post("/api/auth/users", requireAdmin, async (req, res) => {
-  const { email, password, name, role } = req.body;
+  const { email, password, name, role, company_id } = req.body;
   if (!email || !password || !name || !role) {
     return res
       .status(400)
       .json({ error: "Name, email, password, and role are required" });
+  }
+
+  let finalCompanyId = null;
+  if (role === "corporate") {
+    if (!company_id) {
+      return res
+        .status(400)
+        .json({ error: "Company is required for corporate accounts" });
+    }
+    const { data: company, error: compErr } = await supabase
+      .from("companies")
+      .select("id, name")
+      .eq("id", company_id)
+      .maybeSingle();
+
+    if (compErr || !company) {
+      return res
+        .status(400)
+        .json({ error: "Selected company does not exist in the database" });
+    }
+    finalCompanyId = company.id;
   }
 
   const { data: authData, error: authError } =
@@ -1274,13 +1581,29 @@ app.post("/api/auth/users", requireAdmin, async (req, res) => {
 
   const { data, error: profileError } = await supabase
     .from("profiles")
-    .insert([{ id: authData.user.id, email, name, role, approved: true }])
-    .select()
+    .insert([
+      {
+        id: authData.user.id,
+        email,
+        name,
+        role,
+        approved: true,
+        company_id: finalCompanyId,
+      },
+    ])
+    .select("*, companies!profiles_company_id_fkey(id, name)")
     .single();
+
   if (profileError)
     return res.status(500).json({ error: profileError.message });
 
-  res.json({ success: true, user: data });
+  res.json({
+    success: true,
+    user: {
+      ...data,
+      company_name: data.companies?.name || null,
+    },
+  });
 });
 
 // Admin: delete a user entirely (auth + profile)
@@ -1303,21 +1626,51 @@ app.delete("/api/auth/users/:userId", requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
-// Admin: edit a user's name/email
+// Admin: edit a user's name, email, role, and company association
 app.patch("/api/auth/users/:userId", requireAdmin, async (req, res) => {
   const { userId } = req.params;
-  const { name, email } = req.body;
+  const { name, email, role, company_id } = req.body;
 
   if (!name || !email) {
     return res.status(400).json({ error: "Name and email are required" });
   }
 
+  const updates = { name, email };
+
+  if (role) {
+    const validRoles = ["admin", "recruiter", "candidate", "corporate"];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+    updates.role = role;
+  }
+
+  if (company_id !== undefined) {
+    if (company_id) {
+      const { data: company, error: compErr } = await supabase
+        .from("companies")
+        .select("id, name")
+        .eq("id", company_id)
+        .maybeSingle();
+
+      if (compErr || !company) {
+        return res
+          .status(400)
+          .json({ error: "Selected company does not exist in the database" });
+      }
+      updates.company_id = company.id;
+    } else {
+      updates.company_id = null;
+    }
+  }
+
   const { data, error } = await supabase
     .from("profiles")
-    .update({ name, email })
+    .update(updates)
     .eq("id", userId)
-    .select()
+    .select("*, companies!profiles_company_id_fkey(id, name)")
     .single();
+
   if (error) return res.status(500).json({ error: error.message });
 
   try {
@@ -1326,25 +1679,95 @@ app.patch("/api/auth/users/:userId", requireAdmin, async (req, res) => {
     console.error("Auth user email update error:", err);
   }
 
-  res.json({ success: true, user: data });
+  res.json({
+    success: true,
+    user: {
+      ...data,
+      company_name: data.companies?.name || null,
+    },
+  });
 });
 
 // Admin: change an existing user's role
 app.post("/api/auth/users/:userId/role", requireAdmin, async (req, res) => {
   const { userId } = req.params;
-  const { role } = req.body;
+  const { role, company_id } = req.body;
 
   const validRoles = ["admin", "recruiter", "candidate", "corporate"];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ error: "Invalid role" });
   }
 
+  const updates = { role };
+  if (role === "corporate" && company_id) {
+    const { data: comp } = await supabase
+      .from("companies")
+      .select("id")
+      .eq("id", company_id)
+      .maybeSingle();
+    if (comp) updates.company_id = comp.id;
+  }
+
   const { error } = await supabase
     .from("profiles")
-    .update({ role })
+    .update(updates)
     .eq("id", userId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+});
+
+// Admin: safely and explicitly link a corporate user account to a company
+app.post("/api/companies/:companyId/link-corporate-user", requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    const { userId, email } = req.body;
+
+    if (!userId && !email) {
+      return res.status(400).json({ error: "userId or email is required" });
+    }
+
+    const { data: company, error: compErr } = await supabase
+      .from("companies")
+      .select("id, name, hr_email")
+      .eq("id", companyId)
+      .maybeSingle();
+
+    if (compErr || !company) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    let userQuery = supabase.from("profiles").select("*");
+    if (userId) userQuery = userQuery.eq("id", userId);
+    else if (email) userQuery = userQuery.eq("email", email.trim().toLowerCase());
+
+    const { data: targetProfile, error: profileErr } = await userQuery.maybeSingle();
+    if (profileErr || !targetProfile) {
+      return res.status(404).json({ error: "User profile not found" });
+    }
+
+    const { data: updatedUser, error: updateErr } = await supabase
+      .from("profiles")
+      .update({
+        company_id: company.id,
+        role: "corporate",
+      })
+      .eq("id", targetProfile.id)
+      .select("*, companies!profiles_company_id_fkey(id, name)")
+      .single();
+
+    if (updateErr) return res.status(500).json({ error: updateErr.message });
+
+    res.json({
+      success: true,
+      message: `User ${updatedUser.email} linked to ${company.name}`,
+      user: {
+        ...updatedUser,
+        company_name: company.name,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 // Log a new call
 app.post("/api/calls", requireStaff, async (req, res) => {

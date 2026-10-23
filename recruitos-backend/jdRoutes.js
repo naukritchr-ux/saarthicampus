@@ -14,11 +14,22 @@ const { requireRole } = createAuthMiddleware(supabase);
 router.post('/generate', requireRole('admin', 'recruiter', 'corporate'), async (req, res) => {
   try {
     const { prompt, company } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'prompt is required' });
+    let targetCompany = company;
+    if (req.userProfile?.role === 'corporate') {
+      if (!req.userProfile.company_id) {
+        return res.status(403).json({ error: 'Company association required' });
+      }
+      const { data: comp } = await supabase
+        .from('companies')
+        .select('name')
+        .eq('id', req.userProfile.company_id)
+        .maybeSingle();
+      targetCompany = comp?.name || company;
+    }
 
     const fullPrompt = `Generate a complete, professional job description based on this request:
 "${prompt}"
-${company ? `Company: ${company}` : ''}
+${targetCompany ? `Company: ${targetCompany}` : ''}
 
 Respond with ONLY valid JSON, no markdown, no explanation, in exactly this shape:
 {

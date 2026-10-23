@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import * as XLSX from 'xlsx';
-import { generateJD } from '../lib/api';
+import { generateJD, addJob, updateJob, deleteJob } from '../lib/api';
 
 const IN_HOUSE_COMPANY = 'Talent Corner';
 const NEW_COMPANY_VALUE = '__new__';
@@ -111,7 +111,9 @@ function JobCard({ job, onEdit, onDelete }) {
   );
 }
 
-export default function Jobs() {
+export default function Jobs({ user }) {
+  const [userProfile, setUserProfile] = useState(null);
+
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -142,26 +144,57 @@ export default function Jobs() {
   const [importResult, setImportResult] = useState(null);
   const fileInputRef = useRef(null);
 
-  async function loadJobs() {
+  async function loadJobs(profileParam) {
+    const profile = profileParam || userProfile;
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('job_profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Failed to load jobs:', error);
-      setError('Could not load job profiles. Check your Supabase connection.');
+    if (profile?.role === 'corporate') {
+      if (!profile.company_id) {
+        setError('No company is linked to your corporate account. Please contact an administrator to link your company.');
+        setJobs([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error: err } = await supabase
+        .from('job_profiles')
+        .select('*')
+        .eq('company_id', profile.company_id)
+        .order('created_at', { ascending: false });
+
+      if (err) {
+        console.error('Failed to load company jobs:', err);
+        setError('Could not load job profiles for your company.');
+      } else {
+        setJobs(data ?? []);
+      }
     } else {
-      setJobs(data ?? []);
+      // Admin / recruiter: see all companies' jobs
+      const { data, error: err } = await supabase
+        .from('job_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (err) {
+        console.error('Failed to load jobs:', err);
+        setError('Could not load job profiles. Check your Supabase connection.');
+      } else {
+        setJobs(data ?? []);
+      }
     }
     setLoading(false);
   }
 
-  async function loadCompanyOptions() {
-    const { data, error } = await supabase.from('companies').select('id, name').order('name');
-    if (!error) setCompanyOptions(data ?? []);
+  async function loadCompanyOptions(profileParam) {
+    const profile = profileParam || userProfile;
+    if (profile?.role === 'corporate' && profile.company_id) {
+      setCompanyOptions([{ id: profile.company_id, name: profile.company_name || 'My Company' }]);
+      return;
+    }
+
+    const { data, error: err } = await supabase.from('companies').select('id, name').order('name');
+    if (!err) setCompanyOptions(data ?? []);
   }
 
   useEffect(() => {
@@ -170,31 +203,61 @@ export default function Jobs() {
     async function init() {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase
-        .from('job_profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+
+      // Verify authenticated user from Supabase session
+      let activeUserId = user?.id;
+      if (!activeUserId) {
+        const { data: authData } = await supabase.auth.getUser();
+        activeUserId = authData?.user?.id;
+      }
+
+      let verifiedProfile = null;
+      if (activeUserId) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, email, name, role, company_id')
+          .eq('id', activeUserId)
+          .single();
+
+        if (prof) {
+          verifiedProfile = prof;
+          if (prof.company_id) {
+            const { data: comp } = await supabase
+              .from('companies')
+              .select('id, name')
+              .eq('id', prof.company_id)
+              .maybeSingle();
+            verifiedProfile.company_name = comp?.name || null;
+          }
+        }
+      }
 
       if (ignore) return;
 
-      if (error) {
-        console.error('Failed to load jobs:', error);
-        setError('Could not load job profiles. Check your Supabase connection.');
-      } else {
-        setJobs(data ?? []);
-      }
-      setLoading(false);
+      setUserProfile(verifiedProfile);
 
-      await loadCompanyOptions();
+      if (verifiedProfile?.role === 'corporate') {
+        setAiCompany(verifiedProfile.company_name || '');
+      }
+
+      await loadJobs(verifiedProfile);
+      await loadCompanyOptions(verifiedProfile);
     }
 
     init();
     return () => { ignore = true; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Keep the dropdown + "new company" text field in sync with form.company
   // whenever the form is opened for add/edit.
   function syncCompanySelectFromForm(companyValue) {
+    if (userProfile?.role === 'corporate') {
+      setCompanySelect(userProfile.company_name || companyValue || '');
+      setNewCompanyName('');
+      return;
+    }
+
     if (!companyValue || companyValue === IN_HOUSE_COMPANY) {
       setCompanySelect(companyValue === IN_HOUSE_COMPANY ? IN_HOUSE_COMPANY : '');
       setNewCompanyName('');
@@ -205,9 +268,6 @@ export default function Jobs() {
       setCompanySelect(companyValue);
       setNewCompanyName('');
     } else {
-      // Existing job has a company name that isn't in the companies table
-      // (legacy free-text data) — surface it via the "Add new company" slot
-      // so it isn't silently lost.
       setCompanySelect(NEW_COMPANY_VALUE);
       setNewCompanyName(companyValue);
     }
@@ -215,9 +275,10 @@ export default function Jobs() {
 
   function startEdit(j) {
     setEditingId(j.id);
+    const coName = userProfile?.role === 'corporate' ? (userProfile.company_name || j.company || '') : (j.company || '');
     setForm({
       title: j.title || '',
-      company: j.company || '',
+      company: coName,
       location: j.location || '',
       salary_range: j.salary_range || '',
       experience: j.experience || '',
@@ -228,14 +289,18 @@ export default function Jobs() {
       employment_type: j.employment_type || '',
       reporting_to: j.reporting_to || '',
     });
-    syncCompanySelectFromForm(j.company || '');
+    syncCompanySelectFromForm(coName);
     setShowForm(true);
   }
 
   function startAdd() {
     setEditingId(null);
-    setForm(emptyForm);
-    setCompanySelect('');
+    const defaultCo = userProfile?.role === 'corporate' ? (userProfile.company_name || '') : '';
+    setForm({
+      ...emptyForm,
+      company: defaultCo,
+    });
+    setCompanySelect(defaultCo);
     setNewCompanyName('');
     setShowForm(true);
   }
@@ -248,9 +313,9 @@ export default function Jobs() {
     setNewCompanyName('');
   }
 
-  // Dropdown change handler: keeps form.company (the text actually saved to
-  // job_profiles) in sync with whichever option is picked.
+  // Dropdown change handler: keeps form.company in sync
   function handleCompanySelectChange(value) {
+    if (userProfile?.role === 'corporate') return; // Locked for corporate users
     setCompanySelect(value);
     if (value === NEW_COMPANY_VALUE) {
       setForm((f) => ({ ...f, company: newCompanyName }));
@@ -261,6 +326,7 @@ export default function Jobs() {
   }
 
   function handleNewCompanyNameChange(value) {
+    if (userProfile?.role === 'corporate') return;
     setNewCompanyName(value);
     setForm((f) => ({ ...f, company: value }));
   }
@@ -268,7 +334,16 @@ export default function Jobs() {
   async function handleSaveJob(e) {
     e.preventDefault();
 
-    if (!form.company || !form.company.trim()) {
+    if (userProfile?.role === 'corporate' && !userProfile.company_id) {
+      alert('Your corporate account does not have a linked company. Please contact an admin.');
+      return;
+    }
+
+    const companyToSave = userProfile?.role === 'corporate'
+      ? (userProfile.company_name || form.company.trim())
+      : form.company.trim();
+
+    if (!companyToSave) {
       alert('Please select or enter a company (choose "Talent Corner (In-house)" for internal roles).');
       return;
     }
@@ -280,9 +355,20 @@ export default function Jobs() {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    let targetCompanyId = null;
+    if (userProfile?.role === 'corporate') {
+      targetCompanyId = userProfile.company_id;
+    } else {
+      const match = companyOptions.find(
+        (c) => c.name.toLowerCase() === companyToSave.toLowerCase()
+      );
+      if (match) targetCompanyId = match.id;
+    }
+
     const payload = {
-      title: form.title,
-      company: form.company.trim(),
+      title: form.title.trim(),
+      company: companyToSave,
+      company_id: targetCompanyId,
       location: form.location,
       salary_range: form.salary_range,
       experience: form.experience,
@@ -294,53 +380,50 @@ export default function Jobs() {
       reporting_to: form.reporting_to || null,
     };
 
-    // If the user typed a brand-new company name, add it to the `companies`
-    // table too (best-effort — job_profiles.company is still saved as plain
-    // text either way, so this never blocks saving the job).
-    if (companySelect === NEW_COMPANY_VALUE && newCompanyName.trim()) {
+    // If an admin typed a brand-new company name, add it to companies table
+    if (userProfile?.role !== 'corporate' && companySelect === NEW_COMPANY_VALUE && newCompanyName.trim()) {
       const exists = companyOptions.some(
         (c) => c.name.toLowerCase() === newCompanyName.trim().toLowerCase(),
       );
       if (!exists) {
-        const { error: coErr } = await supabase.from('companies').insert([{ name: newCompanyName.trim() }]);
+        const { data: createdCo, error: coErr } = await supabase
+          .from('companies')
+          .insert([{ name: newCompanyName.trim() }])
+          .select()
+          .single();
         if (coErr) {
           console.warn('Could not add new company to companies table:', coErr.message);
-        } else {
-          await loadCompanyOptions();
+        } else if (createdCo) {
+          payload.company_id = createdCo.id;
+          await loadCompanyOptions(userProfile);
         }
       }
     }
 
-    if (editingId) {
-      const { error } = await supabase.from('job_profiles').update(payload).eq('id', editingId);
-      if (error) {
-        console.error('Failed to update job:', error);
-        alert('Could not update job profile. Check console for details.');
+    try {
+      if (editingId) {
+        await updateJob(editingId, payload);
       } else {
-        cancelForm();
-        await loadJobs();
+        await addJob(payload);
       }
-    } else {
-      const { error } = await supabase.from('job_profiles').insert([payload]);
-      if (error) {
-        console.error('Failed to add job:', error);
-        alert('Could not add job profile. Check console for details.');
-      } else {
-        cancelForm();
-        await loadJobs();
-      }
+      cancelForm();
+      await loadJobs(userProfile);
+    } catch (err) {
+      console.error('Failed to save job:', err);
+      alert(err.message || 'Could not save job profile. Please try again.');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
   async function handleDeleteJob(id, title) {
     if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
-    const { error } = await supabase.from('job_profiles').delete().eq('id', id);
-    if (error) {
-      console.error('Failed to delete job:', error);
-      alert('Could not delete job profile. Check console for details.');
-    } else {
-      await loadJobs();
+    try {
+      await deleteJob(id);
+      await loadJobs(userProfile);
+    } catch (err) {
+      console.error('Failed to delete job:', err);
+      alert(err.message || 'Could not delete job profile.');
     }
   }
 
@@ -378,14 +461,30 @@ export default function Jobs() {
     setImporting(true);
     let success = 0;
     let failed = 0;
+
+    const isCorp = userProfile?.role === 'corporate';
+    const corpCompanyId = isCorp ? userProfile.company_id : null;
+    const corpCompanyName = isCorp ? (userProfile.company_name || 'Corporate') : null;
+
     for (const row of importRows) {
       const skillsArray = (row.skills || '')
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-      const { error } = await supabase.from('job_profiles').insert([{
+
+      const targetCompany = corpCompanyName || row.company || IN_HOUSE_COMPANY;
+      let targetCompanyId = corpCompanyId;
+      if (!isCorp && !targetCompanyId) {
+        const match = companyOptions.find(
+          (c) => c.name.toLowerCase() === targetCompany.toLowerCase()
+        );
+        if (match) targetCompanyId = match.id;
+      }
+
+      const { error: insErr } = await supabase.from('job_profiles').insert([{
         title: row.title,
-        company: row.company || IN_HOUSE_COMPANY,
+        company: targetCompany,
+        company_id: targetCompanyId,
         location: row.location || null,
         salary_range: row.salary_range || null,
         experience: row.experience || null,
@@ -396,13 +495,13 @@ export default function Jobs() {
         employment_type: row.employment_type || null,
         reporting_to: row.reporting_to || null,
       }]);
-      if (error) failed += 1; else success += 1;
+      if (insErr) failed += 1; else success += 1;
     }
     setImporting(false);
     setImportResult({ success, failed });
     setImportRows(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
-    await loadJobs();
+    await loadJobs(userProfile);
   }
 
   async function handleGenerateJD() {
@@ -468,7 +567,13 @@ export default function Jobs() {
       <div className="page-head">
         <div>
           <h1>Job Profiles / JD</h1>
-          <p>{loading ? 'Loading…' : `${jobs.length} active job descriptions across in-house and corporate`}</p>
+          <p>
+            {loading
+              ? 'Loading…'
+              : userProfile?.role === 'corporate'
+                ? `${jobs.length} active job profiles for ${userProfile.company_name || 'your company'}`
+                : `${jobs.length} active job descriptions across in-house and corporate`}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
@@ -486,7 +591,7 @@ export default function Jobs() {
         </div>
       </div>
 
-      {error && <div className="panel" style={{ color: 'crimson' }}>{error}</div>}
+      {error && <div className="panel" style={{ color: 'crimson', borderLeft: '4px solid crimson' }}>{error}</div>}
       {showAIGen && (
         <div className="panel">
           <div className="panel-title">✨ Generate Job Description with AI</div>
@@ -501,12 +606,28 @@ export default function Jobs() {
               />
             </div>
             <div className="field" style={{ margin: 0 }}>
-              <label>Company (optional — leave blank for In-house)</label>
-              <input
-                className="search-box" style={{ width: '100%' }}
-                placeholder="e.g. TCS"
-                value={aiCompany} onChange={(e) => setAiCompany(e.target.value)}
-              />
+              <label>Company</label>
+              {userProfile?.role === 'corporate' ? (
+                <div
+                  className="search-box"
+                  style={{
+                    width: '100%',
+                    background: 'var(--bg-card, #f8f9fa)',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '8px 10px',
+                  }}
+                >
+                  🏢 {userProfile.company_name || 'Your Company'}
+                </div>
+              ) : (
+                <input
+                  className="search-box" style={{ width: '100%' }}
+                  placeholder="e.g. TCS"
+                  value={aiCompany} onChange={(e) => setAiCompany(e.target.value)}
+                />
+              )}
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label>Key Skills</label>
@@ -629,34 +750,53 @@ export default function Jobs() {
                 value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
               />
 
-              {/* Company: dropdown instead of free text, so this can never
-                  silently save as NULL/blank again. */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <select
-                  className="search-box"
-                  required
-                  value={companySelect}
-                  onChange={(e) => handleCompanySelectChange(e.target.value)}
-                >
-                  <option value="" disabled>— Select company —</option>
-                  <option value={IN_HOUSE_COMPANY}>Talent Corner (In-house)</option>
-                  {companyOptions
-                    .filter((c) => c.name !== IN_HOUSE_COMPANY)
-                    .map((c) => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  <option value={NEW_COMPANY_VALUE}>+ Add new company…</option>
-                </select>
-                {companySelect === NEW_COMPANY_VALUE && (
-                  <input
+              {/* Company selection: locked for corporate users, dropdown for staff */}
+              {userProfile?.role === 'corporate' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div
                     className="search-box"
-                    placeholder="New company name (e.g. TCS)"
+                    style={{
+                      background: 'var(--bg-card, #f8f9fa)',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px 10px',
+                    }}
+                  >
+                    🏢 {userProfile.company_name || form.company || 'Your Company'}
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Locked to your verified company profile
+                  </span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <select
+                    className="search-box"
                     required
-                    value={newCompanyName}
-                    onChange={(e) => handleNewCompanyNameChange(e.target.value)}
-                  />
-                )}
-              </div>
+                    value={companySelect}
+                    onChange={(e) => handleCompanySelectChange(e.target.value)}
+                  >
+                    <option value="" disabled>— Select company —</option>
+                    <option value={IN_HOUSE_COMPANY}>Talent Corner (In-house)</option>
+                    {companyOptions
+                      .filter((c) => c.name !== IN_HOUSE_COMPANY)
+                      .map((c) => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    <option value={NEW_COMPANY_VALUE}>+ Add new company…</option>
+                  </select>
+                  {companySelect === NEW_COMPANY_VALUE && (
+                    <input
+                      className="search-box"
+                      placeholder="New company name (e.g. TCS)"
+                      required
+                      value={newCompanyName}
+                      onChange={(e) => handleNewCompanyNameChange(e.target.value)}
+                    />
+                  )}
+                </div>
+              )}
 
               <input
                 className="search-box" placeholder="Location (e.g. Pan India, Pune)"

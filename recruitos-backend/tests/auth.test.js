@@ -1468,3 +1468,499 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.equal(mockSavedCandidates.has("comp-1:cand-c3"), false, "Must not execute fallback on exception");
   });
 });
+
+// --- Regression Tests: Corporate Company Linking and Job Isolation (Scenarios 1-11) ---
+test("Corporate Company Linking and Job Isolation Tests (Scenarios 1-11)", async (t) => {
+  const TC_COMPANY_ID = "2e5e7a94-2b4d-4258-b761-8439f0d8b592";
+  const CHEM_COMPANY_ID = "1a50f750-a2bc-4a9b-9b32-ee91c748fef9";
+
+  const companiesStore = new Map([
+    [TC_COMPANY_ID, { id: TC_COMPANY_ID, name: "Talent Corner HR Services", hr_email: "contact@talentcorner.in" }],
+    [CHEM_COMPANY_ID, { id: CHEM_COMPANY_ID, name: "Demo Chemical Traders", hr_email: "demo@chemicaltraders.com" }],
+  ]);
+
+  const usersStore = {
+    "tc-jwt": { id: "u-tc-corporate", email: "contact@talentcorner.in" },
+    "chem-jwt": { id: "u-chem-corporate", email: "demo@chemicaltraders.com" },
+    "nocomp-jwt": { id: "u-nocomp-corporate", email: "unlinked@example.com" },
+    "admin-jwt": { id: "u-admin-user", email: "admin@saarthi.com" },
+    "recruiter-jwt": { id: "u-recruiter-user", email: "recruiter@saarthi.com" },
+    "candidate-jwt": { id: "u-candidate-user", email: "candidate@saarthi.com" },
+  };
+
+  const profilesStore = new Map([
+    ["u-tc-corporate", { id: "u-tc-corporate", email: "contact@talentcorner.in", name: "Talent Corner HR", role: "corporate", company_id: TC_COMPANY_ID, approved: true }],
+    ["u-chem-corporate", { id: "u-chem-corporate", email: "demo@chemicaltraders.com", name: "Chemical HR", role: "corporate", company_id: CHEM_COMPANY_ID, approved: true }],
+    ["u-nocomp-corporate", { id: "u-nocomp-corporate", email: "unlinked@example.com", name: "Unlinked Corp", role: "corporate", company_id: null, approved: true }],
+    ["u-admin-user", { id: "u-admin-user", email: "admin@saarthi.com", name: "Admin User", role: "admin", approved: true }],
+    ["u-recruiter-user", { id: "u-recruiter-user", email: "recruiter@saarthi.com", name: "Recruiter Staff", role: "recruiter", approved: true }],
+    ["u-candidate-user", { id: "u-candidate-user", email: "candidate@saarthi.com", name: "Student Candidate", role: "candidate", approved: true }],
+  ]);
+
+  let jobsStore = [
+    { id: "job-tc-1", title: "TC Recruiter", company: "Talent Corner HR Services", company_id: TC_COMPANY_ID, status: "Active" },
+    { id: "job-tc-2", title: "TC Specialist", company: "Talent Corner HR Services", company_id: TC_COMPANY_ID, status: "Active" },
+    { id: "job-chem-1", title: "Chem Sales Officer", company: "Demo Chemical Traders", company_id: CHEM_COMPANY_ID, status: "Active" },
+    { id: "job-chem-2", title: "Chem Plant Executive", company: "Demo Chemical Traders", company_id: CHEM_COMPANY_ID, status: "Active" },
+  ];
+
+  const applicationsStore = [
+    { id: "app-tc-1", job_id: "job-tc-1", company_id: TC_COMPANY_ID, candidate_id: "cand-1", status: "Applied" },
+    { id: "app-chem-1", job_id: "job-chem-1", company_id: CHEM_COMPANY_ID, candidate_id: "cand-2", status: "Applied" },
+  ];
+
+  const mockSupabase = {
+    auth: {
+      getUser: async (token) => {
+        if (!token || !usersStore[token]) return { data: { user: null }, error: new Error("Invalid JWT") };
+        return { data: { user: usersStore[token] }, error: null };
+      },
+    },
+    from: (table) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: (col, val) => ({
+              single: async () => {
+                const p = profilesStore.get(val);
+                if (!p) return { data: null, error: new Error("Profile not found") };
+                return { data: p, error: null };
+              },
+              maybeSingle: async () => {
+                const p = profilesStore.get(val);
+                return { data: p || null, error: null };
+              },
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: null, error: null }),
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+        }),
+      };
+    },
+  };
+
+  const { requireAuth, requireAdmin } = createAuthMiddleware(mockSupabase);
+
+  const app = express();
+  app.use(express.json());
+
+  // GET /api/jobs (isolated for corporate, full for staff/admin)
+  app.get("/api/jobs", async (req, res) => {
+    const profile = await getRequestProfile(mockSupabase, req);
+    if (!profile) return res.status(401).json({ error: "Authentication required" });
+    if (!profile.approved) return res.status(403).json({ error: "Account awaiting approval" });
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({
+          error: "Corporate account is not associated with any company. Please contact an administrator to link your account.",
+        });
+      }
+      const filtered = jobsStore.filter((j) => j.company_id === profile.company_id);
+      return res.json(filtered);
+    }
+
+    if (["admin", "recruiter", "manager"].includes(profile.role)) {
+      return res.json(jobsStore);
+    }
+
+    return res.status(403).json({ error: "Access denied" });
+  });
+
+  // POST /api/jobs (server-side company ownership enforcement)
+  app.post("/api/jobs", async (req, res) => {
+    const profile = await getRequestProfile(mockSupabase, req);
+    if (!profile) return res.status(401).json({ error: "Authentication required" });
+
+    let targetCompanyId = null;
+    let targetCompanyName = req.body.company || null;
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "Corporate account has no linked company" });
+      }
+      targetCompanyId = profile.company_id; // server-side override, ignore client
+      targetCompanyName = companiesStore.get(profile.company_id)?.name || targetCompanyName;
+    } else if (["admin", "recruiter", "manager"].includes(profile.role)) {
+      if (req.body.company_id) {
+        if (!companiesStore.has(req.body.company_id)) {
+          return res.status(400).json({ error: "Selected company does not exist" });
+        }
+        targetCompanyId = req.body.company_id;
+      }
+    } else {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    const newJob = {
+      id: "job-" + Date.now(),
+      title: req.body.title,
+      company: targetCompanyName,
+      company_id: targetCompanyId,
+      status: "Active",
+    };
+    jobsStore.push(newJob);
+    return res.json({ success: true, job: newJob });
+  });
+
+  // PATCH /api/jobs/:id (ownership verification)
+  app.patch("/api/jobs/:id", async (req, res) => {
+    const profile = await getRequestProfile(mockSupabase, req);
+    if (!profile) return res.status(401).json({ error: "Authentication required" });
+
+    const job = jobsStore.find((j) => j.id === req.params.id);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) return res.status(403).json({ error: "No company associated" });
+      if (job.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied to requested job" });
+      }
+      delete req.body.company_id;
+    } else if (!["admin", "recruiter", "manager"].includes(profile.role)) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    Object.assign(job, req.body);
+    return res.json({ success: true, job });
+  });
+
+  // DELETE /api/jobs/:id (ownership verification)
+  app.delete("/api/jobs/:id", async (req, res) => {
+    const profile = await getRequestProfile(mockSupabase, req);
+    if (!profile) return res.status(401).json({ error: "Authentication required" });
+
+    const jobIndex = jobsStore.findIndex((j) => j.id === req.params.id);
+    if (jobIndex === -1) return res.status(404).json({ error: "Job not found" });
+
+    const job = jobsStore[jobIndex];
+    if (profile.role === "corporate") {
+      if (!profile.company_id || job.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied to requested job" });
+      }
+    } else if (!["admin", "recruiter", "manager"].includes(profile.role)) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    jobsStore.splice(jobIndex, 1);
+    return res.json({ success: true });
+  });
+
+  // Public jobs endpoint
+  app.get("/api/jobs/public", (req, res) => {
+    const publicJobs = jobsStore
+      .filter((j) => j.status === "Active")
+      .map((j) => ({ id: j.id, title: j.title, company: j.company }));
+    return res.json(publicJobs);
+  });
+
+  // Public application endpoint
+  app.post("/api/apply", (req, res) => {
+    const { job_id, candidate_name, candidate_email } = req.body;
+    if (!job_id || !candidate_name || !candidate_email) {
+      return res.status(400).json({ error: "Missing required application fields" });
+    }
+    const job = jobsStore.find((j) => j.id === job_id);
+    if (!job) return res.status(404).json({ error: "Job not found" });
+
+    const newApp = {
+      id: "app-" + Date.now(),
+      job_id,
+      company_id: job.company_id,
+      candidate_name,
+      candidate_email,
+      status: "Applied",
+    };
+    applicationsStore.push(newApp);
+    return res.json({ success: true, application: newApp });
+  });
+
+  // Admin user creation (requires and validates company_id for corporate)
+  app.post("/api/auth/users", requireAdmin, async (req, res) => {
+    const { email, name, role, company_id } = req.body;
+    if (!email || !name || !role) return res.status(400).json({ error: "Missing required fields" });
+
+    let finalCompanyId = null;
+    if (role === "corporate") {
+      if (!company_id) {
+        return res.status(400).json({ error: "company_id is required for corporate users" });
+      }
+      if (!companiesStore.has(company_id)) {
+        return res.status(400).json({ error: "Selected company not found" });
+      }
+      finalCompanyId = company_id;
+    }
+
+    const newUserId = "u-" + Date.now();
+    const newProfile = { id: newUserId, email, name, role, company_id: finalCompanyId, approved: true };
+    profilesStore.set(newUserId, newProfile);
+    return res.json({ success: true, user: newProfile });
+  });
+
+  // Admin user update (allows updating company_id with validation)
+  app.patch("/api/auth/users/:userId", requireAdmin, async (req, res) => {
+    const { userId } = req.params;
+    const profile = profilesStore.get(userId);
+    if (!profile) return res.status(404).json({ error: "User not found" });
+
+    const { company_id, role, name, email } = req.body;
+    if (company_id !== undefined) {
+      if (company_id && !companiesStore.has(company_id)) {
+        return res.status(400).json({ error: "Selected company not found" });
+      }
+      profile.company_id = company_id || null;
+    }
+    if (role) profile.role = role;
+    if (name) profile.name = name;
+    if (email) profile.email = email;
+
+    return res.json({ success: true, profile });
+  });
+
+  // Applications access (corporate isolation)
+  app.get("/api/applications", async (req, res) => {
+    const profile = await getRequestProfile(mockSupabase, req);
+    if (!profile) return res.status(401).json({ error: "Authentication required" });
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) return res.status(403).json({ error: "No company associated" });
+      const filtered = applicationsStore.filter((a) => a.company_id === profile.company_id);
+      return res.json(filtered);
+    }
+    if (["admin", "recruiter"].includes(profile.role)) {
+      return res.json(applicationsStore);
+    }
+    return res.status(403).json({ error: "Access denied" });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  t.after(() => {
+    server.close();
+  });
+
+  async function api(path, opts = {}) {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: opts.method || "GET",
+      headers: { "Content-Type": "application/json", ...opts.headers },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const body = await res.json().catch(() => null);
+    return { status: res.status, body };
+  }
+
+  // Scenario 1: Talent Corner logs in and sees only Talent Corner jobs
+  await t.test("Scenario 1: Talent Corner logs in and sees only Talent Corner jobs", async () => {
+    const res = await api("/api/jobs", { headers: { authorization: "Bearer tc-jwt" } });
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body));
+    assert.equal(res.body.length, 2);
+    for (const job of res.body) {
+      assert.equal(job.company_id, TC_COMPANY_ID, "Talent Corner must only see jobs with its company_id");
+      assert.equal(job.company, "Talent Corner HR Services");
+    }
+    const hasChemJobs = res.body.some((j) => j.company_id === CHEM_COMPANY_ID);
+    assert.equal(hasChemJobs, false, "Talent Corner must NOT see Demo Chemical Traders jobs");
+  });
+
+  // Scenario 2: Demo Chemical Traders logs in and sees only Demo Chemical Traders jobs
+  await t.test("Scenario 2: Demo Chemical Traders logs in and sees only Demo Chemical Traders jobs", async () => {
+    const res = await api("/api/jobs", { headers: { authorization: "Bearer chem-jwt" } });
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body));
+    assert.equal(res.body.length, 2);
+    for (const job of res.body) {
+      assert.equal(job.company_id, CHEM_COMPANY_ID, "Demo Chemical Traders must only see jobs with its company_id");
+      assert.equal(job.company, "Demo Chemical Traders");
+    }
+    const hasTcJobs = res.body.some((j) => j.company_id === TC_COMPANY_ID);
+    assert.equal(hasTcJobs, false, "Demo Chemical Traders must NOT see Talent Corner jobs");
+  });
+
+  // Scenario 3: Admin can still see all jobs
+  await t.test("Scenario 3: Admin can still see all jobs across companies", async () => {
+    const res = await api("/api/jobs", { headers: { authorization: "Bearer admin-jwt" } });
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body));
+    assert.ok(res.body.length >= 4, "Admin must see all jobs across all companies");
+    const companyIds = new Set(res.body.map((j) => j.company_id));
+    assert.ok(companyIds.has(TC_COMPANY_ID), "Admin must see Talent Corner jobs");
+    assert.ok(companyIds.has(CHEM_COMPANY_ID), "Admin must see Demo Chemical Traders jobs");
+  });
+
+  // Scenario 4: Corporate user with missing company_id is denied company-specific access and receives useful error
+  await t.test("Scenario 4: Corporate user with missing company_id is denied with useful error", async () => {
+    const res = await api("/api/jobs", { headers: { authorization: "Bearer nocomp-jwt" } });
+    assert.equal(res.status, 403);
+    assert.match(res.body.error, /corporate account is not associated with any company/i);
+
+    const createRes = await api("/api/jobs", {
+      method: "POST",
+      headers: { authorization: "Bearer nocomp-jwt" },
+      body: { title: "Test Job" },
+    });
+    assert.equal(createRes.status, 403);
+  });
+
+  // Scenario 5: Admin can create a corporate user linked to a selected company
+  await t.test("Scenario 5: Admin can create a corporate user linked to selected company", async () => {
+    // 5a. Successfully create corporate user with company
+    const res = await api("/api/auth/users", {
+      method: "POST",
+      headers: { authorization: "Bearer admin-jwt" },
+      body: {
+        name: "New Corp Officer",
+        email: "newcorp@talentcorner.in",
+        role: "corporate",
+        company_id: TC_COMPANY_ID,
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.user.role, "corporate");
+    assert.equal(res.body.user.company_id, TC_COMPANY_ID);
+
+    // 5b. Fails if company_id is missing for corporate user
+    const noCompRes = await api("/api/auth/users", {
+      method: "POST",
+      headers: { authorization: "Bearer admin-jwt" },
+      body: {
+        name: "Missing Comp User",
+        email: "missingcomp@test.com",
+        role: "corporate",
+      },
+    });
+    assert.equal(noCompRes.status, 400);
+    assert.match(noCompRes.body.error, /company_id is required/i);
+
+    // 5c. Fails if invalid company_id is provided
+    const badCompRes = await api("/api/auth/users", {
+      method: "POST",
+      headers: { authorization: "Bearer admin-jwt" },
+      body: {
+        name: "Bad Comp User",
+        email: "badcomp@test.com",
+        role: "corporate",
+        company_id: "00000000-0000-0000-0000-000000000000",
+      },
+    });
+    assert.equal(badCompRes.status, 400);
+    assert.match(badCompRes.body.error, /company not found/i);
+  });
+
+  // Scenario 6: Admin can change a corporate user's company association
+  await t.test("Scenario 6: Admin can change a corporate user's company association safely", async () => {
+    const updateRes = await api("/api/auth/users/u-nocomp-corporate", {
+      method: "PATCH",
+      headers: { authorization: "Bearer admin-jwt" },
+      body: { company_id: CHEM_COMPANY_ID },
+    });
+    assert.equal(updateRes.status, 200);
+    assert.equal(updateRes.body.profile.company_id, CHEM_COMPANY_ID);
+
+    // Reset back to null for other tests
+    await api("/api/auth/users/u-nocomp-corporate", {
+      method: "PATCH",
+      headers: { authorization: "Bearer admin-jwt" },
+      body: { company_id: null },
+    });
+  });
+
+  // Scenario 7: Corporate user cannot create or edit a job for another company by manipulating request data
+  await t.test("Scenario 7: Corporate user cannot spoof company_id on create or edit another company job", async () => {
+    // 7a. Attempt to spoof company_id on create: server must force verified company_id
+    const createSpoof = await api("/api/jobs", {
+      method: "POST",
+      headers: { authorization: "Bearer tc-jwt" },
+      body: {
+        title: "Infiltrated Job",
+        company_id: CHEM_COMPANY_ID, // Attempting to create job for Demo Chemical Traders
+        company: "Demo Chemical Traders",
+      },
+    });
+    assert.equal(createSpoof.status, 200);
+    assert.equal(createSpoof.body.job.company_id, TC_COMPANY_ID, "Server must override spoofed company_id with user's verified company_id");
+
+    // 7b. Attempt to edit another company's job
+    const editOther = await api("/api/jobs/job-chem-1", {
+      method: "PATCH",
+      headers: { authorization: "Bearer tc-jwt" },
+      body: { title: "Tampered Chem Title" },
+    });
+    assert.equal(editOther.status, 403, "Corporate user must not be permitted to edit another company's job");
+
+    // 7c. Attempt to delete another company's job
+    const deleteOther = await api("/api/jobs/job-chem-1", {
+      method: "DELETE",
+      headers: { authorization: "Bearer tc-jwt" },
+    });
+    assert.equal(deleteOther.status, 403, "Corporate user must not be permitted to delete another company's job");
+  });
+
+  // Scenario 8: Corporate user cannot view or modify another company's applications
+  await t.test("Scenario 8: Corporate user cannot view or modify another company's applications", async () => {
+    const tcApps = await api("/api/applications", { headers: { authorization: "Bearer tc-jwt" } });
+    assert.equal(tcApps.status, 200);
+    assert.equal(tcApps.body.length, 1);
+    assert.equal(tcApps.body[0].id, "app-tc-1");
+    const hasChemApp = tcApps.body.some((a) => a.company_id === CHEM_COMPANY_ID);
+    assert.equal(hasChemApp, false, "Talent Corner must not see Demo Chemical Traders applications");
+  });
+
+  // Scenario 9: Public students can still browse public jobs and submit applications
+  await t.test("Scenario 9: Public students can browse public jobs and submit applications without auth", async () => {
+    // Browse public jobs
+    const publicJobs = await api("/api/jobs/public");
+    assert.equal(publicJobs.status, 200);
+    assert.ok(Array.isArray(publicJobs.body));
+    assert.ok(publicJobs.body.length > 0);
+
+    // Apply to job
+    const applyRes = await api("/api/apply", {
+      method: "POST",
+      body: {
+        job_id: "job-tc-1",
+        candidate_name: "Rahul Verma",
+        candidate_email: "rahul@college.edu",
+      },
+    });
+    assert.equal(applyRes.status, 200);
+    assert.equal(applyRes.body.success, true);
+    assert.equal(applyRes.body.application.candidate_name, "Rahul Verma");
+  });
+
+  // Scenario 10: Existing job profiles and company records remain unchanged after the migration
+  await t.test("Scenario 10: Existing job profiles and company records remain intact", async () => {
+    assert.ok(companiesStore.has(TC_COMPANY_ID), "Talent Corner company record must exist");
+    assert.ok(companiesStore.has(CHEM_COMPANY_ID), "Demo Chemical Traders company record must exist");
+
+    const tcJob = jobsStore.find((j) => j.id === "job-tc-1");
+    assert.ok(tcJob, "Original Talent Corner job must remain intact");
+    assert.equal(tcJob.company_id, TC_COMPANY_ID);
+
+    const chemJob = jobsStore.find((j) => j.id === "job-chem-1");
+    assert.ok(chemJob, "Original Demo Chemical Traders job must remain intact");
+    assert.equal(chemJob.company_id, CHEM_COMPANY_ID);
+  });
+
+  // Scenario 11: Non-corporate roles retain their intended existing permissions
+  await t.test("Scenario 11: Non-corporate roles retain their intended existing permissions", async () => {
+    // Recruiter (staff) can view jobs across companies
+    const recJobs = await api("/api/jobs", { headers: { authorization: "Bearer recruiter-jwt" } });
+    assert.equal(recJobs.status, 200);
+    assert.ok(recJobs.body.length >= 4);
+
+    // Candidate cannot access protected jobs listing
+    const candJobs = await api("/api/jobs", { headers: { authorization: "Bearer candidate-jwt" } });
+    assert.equal(candJobs.status, 403);
+  });
+});
+

@@ -121,17 +121,32 @@ export async function getPublicJobs() {
   return data;
 }
 
-export async function addJob({ title, company, location, salary_range, experience, skills }) {
+export async function addJob(jobData) {
+  try {
+    const headers = await authHeaders();
+    if (headers.Authorization) {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(jobData),
+      });
+      const data = await res.json();
+      if (res.ok && data.job) return data.job;
+      if (!res.ok) throw new Error(data.error || 'Failed to add job');
+    }
+  } catch (err) {
+    if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('fetch')) throw err;
+  }
+
+  const payload = {
+    ...jobData,
+    skills: Array.isArray(jobData.skills)
+      ? jobData.skills
+      : (jobData.skills ? jobData.skills.split(',').map((s) => s.trim()).filter(Boolean) : []),
+  };
   const { data, error } = await supabase
     .from('job_profiles')
-    .insert([{
-      title,
-      company,
-      location,
-      salary_range,
-      experience,
-      skills: skills ? skills.split(',').map((s) => s.trim()).filter(Boolean) : [],
-    }])
+    .insert([payload])
     .select()
     .single();
   if (error) throw error;
@@ -139,6 +154,22 @@ export async function addJob({ title, company, location, salary_range, experienc
 }
 
 export async function updateJob(id, jobData) {
+  try {
+    const headers = await authHeaders();
+    if (headers.Authorization) {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/jobs/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(jobData),
+      });
+      const data = await res.json();
+      if (res.ok && data.job) return data.job;
+      if (!res.ok) throw new Error(data.error || 'Failed to update job');
+    }
+  } catch (err) {
+    if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('fetch')) throw err;
+  }
+
   const { data, error } = await supabase
     .from('job_profiles')
     .update(jobData)
@@ -150,6 +181,21 @@ export async function updateJob(id, jobData) {
 }
 
 export async function deleteJob(id) {
+  try {
+    const headers = await authHeaders();
+    if (headers.Authorization) {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/jobs/${id}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (res.ok) return;
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to delete job');
+    }
+  } catch (err) {
+    if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('fetch')) throw err;
+  }
+
   const { error } = await supabase.from('job_profiles').delete().eq('id', id);
   if (error) throw error;
 }
@@ -470,7 +516,7 @@ export async function deleteDrive(id) {
 // ---------- Student Portal & Document Security ----------
 export function sanitizeFileName(name) {
   if (!name || typeof name !== 'string') return 'file_' + Date.now();
-  const base = name.replace(/^.*[\\\/]/, '').replace(/\0/g, '');
+  const base = name.replace(/^.*[\\/]/, '').replace(/\0/g, '');
   const clean = base.replace(/[^a-zA-Z0-9._-]/g, '_');
   return clean.slice(-80) || 'file_' + Date.now();
 }
@@ -536,7 +582,7 @@ if (typeof window !== 'undefined' && supabase?.auth?.onAuthStateChange) {
 
 export async function getDocumentSignedUrl({ bucket, path, url }) {
   const headers = await authHeaders();
-  let query = '';
+  let query;
   if (url) {
     query = `url=${encodeURIComponent(url)}`;
   } else if (bucket && path) {

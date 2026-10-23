@@ -44,7 +44,7 @@ function avatarColor(id) {
   return AVATAR_COLORS[hash];
 }
 
-const emptyNewUser = { name: "", email: "", password: "", role: "recruiter" };
+const emptyNewUser = { name: "", email: "", password: "", role: "recruiter", company_id: "" };
 
 function iconBtnStyle(bg, color, border) {
   return {
@@ -65,6 +65,7 @@ function iconBtnStyle(bg, color, border) {
 
 export default function UserManagement() {
   const [users, setUsers] = useState([]);
+  const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -83,13 +84,17 @@ export default function UserManagement() {
   const [addSaving, setAddSaving] = useState(false);
 
   const [editUser, setEditUser] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", email: "" });
+  const [editForm, setEditForm] = useState({ name: "", email: "", role: "recruiter", company_id: "" });
   const [editError, setEditError] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUserId(data.session?.user?.id);
+    });
+
+    supabase.from("companies").select("id, name, hr_email").order("name").then(({ data }) => {
+      if (data) setCompanies(data);
     });
   }, []);
 
@@ -185,13 +190,22 @@ export default function UserManagement() {
 
   function openEdit(u) {
     setEditUser(u);
-    setEditForm({ name: u.name || "", email: u.email || "" });
+    setEditForm({
+      name: u.name || "",
+      email: u.email || "",
+      role: u.role || "recruiter",
+      company_id: u.company_id || "",
+    });
     setEditError("");
   }
 
   async function submitEdit(e) {
     e.preventDefault();
     setEditError("");
+    if (editForm.role === "corporate" && !editForm.company_id) {
+      setEditError("Please select a company for corporate users.");
+      return;
+    }
     setEditSaving(true);
     try {
       const headers = await authHeaders();
@@ -214,6 +228,10 @@ export default function UserManagement() {
   async function submitAddUser(e) {
     e.preventDefault();
     setAddError("");
+    if (newUser.role === "corporate" && !newUser.company_id) {
+      setAddError("Please select a company for corporate users.");
+      return;
+    }
     setAddSaving(true);
     try {
       const headers = await authHeaders();
@@ -460,7 +478,46 @@ export default function UserManagement() {
                           >
                             {initials(u.name)}
                           </div>
-                          <span style={{ fontWeight: 700 }}>{u.name}</span>
+                          <div>
+                            <span style={{ fontWeight: 700 }}>{u.name}</span>
+                            {u.role === "corporate" && (
+                              <div style={{ marginTop: 2 }}>
+                                {u.company_name ? (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      color: "#0369a1",
+                                      background: "#e0f2fe",
+                                      padding: "1px 6px",
+                                      borderRadius: 4,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 3,
+                                    }}
+                                  >
+                                    🏢 {u.company_name}
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      color: "#b45309",
+                                      background: "#fef3c7",
+                                      padding: "1px 6px",
+                                      borderRadius: 4,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 3,
+                                    }}
+                                  >
+                                    ⚠️ No company linked
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td style={{ color: "var(--text-muted)" }}>{u.email}</td>
@@ -649,7 +706,17 @@ export default function UserManagement() {
                 <label>Role</label>
                 <select
                   value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  onChange={(e) => {
+                    const nextRole = e.target.value;
+                    let nextComp = newUser.company_id;
+                    if (nextRole === "corporate" && !nextComp && newUser.email) {
+                      const matched = companies.find(
+                        (c) => c.hr_email && c.hr_email.toLowerCase() === newUser.email.trim().toLowerCase()
+                      );
+                      if (matched) nextComp = matched.id;
+                    }
+                    setNewUser({ ...newUser, role: nextRole, company_id: nextComp });
+                  }}
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 6, marginTop: 4 }}
                 >
                   {ROLES.map((r) => (
@@ -659,6 +726,44 @@ export default function UserManagement() {
                   ))}
                 </select>
               </div>
+              {newUser.role === "corporate" && (
+                <div>
+                  <label>Company *</label>
+                  <select
+                    value={newUser.company_id}
+                    onChange={(e) => setNewUser({ ...newUser, company_id: e.target.value })}
+                    required
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: 6, marginTop: 4 }}
+                  >
+                    <option value="">-- Select Company --</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.hr_email ? `(${c.hr_email})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {newUser.email && (() => {
+                    const matched = companies.find(
+                      (c) => c.hr_email && c.hr_email.toLowerCase() === newUser.email.trim().toLowerCase()
+                    );
+                    if (matched && newUser.company_id !== matched.id) {
+                      return (
+                        <div style={{ fontSize: 12, color: "#2563eb", marginTop: 4 }}>
+                          Suggested: <strong>{matched.name}</strong> matches this email.{" "}
+                          <button
+                            type="button"
+                            onClick={() => setNewUser({ ...newUser, company_id: matched.id })}
+                            style={{ background: "none", border: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", padding: 0 }}
+                          >
+                            Link to {matched.name}
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
               {addError && <p style={{ color: "var(--danger)", fontSize: 12.5 }}>{addError}</p>}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                 <button type="button" className="btn-outline" onClick={() => setShowAddModal(false)} disabled={addSaving}>
@@ -713,6 +818,58 @@ export default function UserManagement() {
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border-default)", marginTop: 4 }}
                 />
               </div>
+              <div>
+                <label>Role</label>
+                <select
+                  value={editForm.role}
+                  onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, marginTop: 4 }}
+                >
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r.charAt(0).toUpperCase() + r.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {editForm.role === "corporate" && (
+                <div>
+                  <label>Company *</label>
+                  <select
+                    value={editForm.company_id || ""}
+                    onChange={(e) => setEditForm({ ...editForm, company_id: e.target.value })}
+                    required
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: 6, marginTop: 4 }}
+                  >
+                    <option value="">-- Select Company --</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.hr_email ? `(${c.hr_email})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {editForm.email && (() => {
+                    const matched = companies.find(
+                      (c) => c.hr_email && c.hr_email.toLowerCase() === editForm.email.trim().toLowerCase()
+                    );
+                    if (matched && editForm.company_id !== matched.id) {
+                      return (
+                        <div style={{ fontSize: 12, color: "#2563eb", marginTop: 4 }}>
+                          Suggested: <strong>{matched.name}</strong> matches this email.{" "}
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({ ...editForm, company_id: matched.id })}
+                            style={{ background: "none", border: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", padding: 0 }}
+                          >
+                            Link to {matched.name}
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
               {editError && <p style={{ color: "var(--danger)", fontSize: 12.5 }}>{editError}</p>}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                 <button type="button" className="btn-outline" onClick={() => setEditUser(null)} disabled={editSaving}>
