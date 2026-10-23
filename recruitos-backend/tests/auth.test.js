@@ -1964,3 +1964,480 @@ test("Corporate Company Linking and Job Isolation Tests (Scenarios 1-11)", async
   });
 });
 
+// --- Tests: Placement Coordinator Registration & Admin Review ---
+test("Placement Coordinator Registration & Admin Review Tests", async (t) => {
+  const collegesStore = new Map([
+    [
+      "col-sharda",
+      {
+        id: "col-sharda",
+        name: "Sharda University",
+        city: "Greater Noida",
+        state: "Uttar Pradesh",
+        course: "Law",
+        tpo: "Prof. Sharma",
+        status: "Interested",
+      },
+    ],
+  ]);
+
+  const placementCoordsStore = new Map();
+  const coordRegistrationsStore = new Map();
+
+  const usersStore = {
+    "admin-jwt": { id: "u-admin", email: "admin@saarthi.com" },
+    "recruiter-jwt": { id: "u-recruiter", email: "recruiter@saarthi.com" },
+    "corporate-jwt": { id: "u-corporate", email: "corp@company.com" },
+    "candidate-jwt": { id: "u-candidate", email: "student@college.edu" },
+  };
+
+  const profilesStore = new Map([
+    ["u-admin", { id: "u-admin", email: "admin@saarthi.com", name: "Admin", role: "admin", approved: true }],
+    ["u-recruiter", { id: "u-recruiter", email: "recruiter@saarthi.com", name: "Recruiter", role: "recruiter", approved: true }],
+    ["u-corporate", { id: "u-corporate", email: "corp@company.com", name: "Corp User", role: "corporate", company_id: "comp-1", approved: true }],
+    ["u-candidate", { id: "u-candidate", email: "student@college.edu", name: "Student", role: "candidate", approved: true }],
+  ]);
+
+  const mockSupabase = {
+    auth: {
+      getUser: async (token) => {
+        if (!token || !usersStore[token]) return { data: { user: null }, error: new Error("Invalid JWT") };
+        return { data: { user: usersStore[token] }, error: null };
+      },
+    },
+    from: (table) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: (col, val) => ({
+              single: async () => {
+                const p = profilesStore.get(val);
+                if (!p) return { data: null, error: new Error("Profile not found") };
+                return { data: p, error: null };
+              },
+              maybeSingle: async () => {
+                const p = profilesStore.get(val);
+                return { data: p || null, error: null };
+              },
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: null, error: null }),
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+        }),
+      };
+    },
+  };
+
+  const { requireStaff } = createAuthMiddleware(mockSupabase);
+
+  const app = express();
+  app.use(express.json());
+
+  // Public coordinator registration endpoint
+  app.post("/api/placement-coordinator/register", async (req, res) => {
+    const {
+      full_name,
+      designation,
+      college_name,
+      official_email,
+      phone,
+      city,
+      state,
+      category,
+      website,
+      remarks,
+    } = req.body;
+
+    if (!full_name || typeof full_name !== "string" || !full_name.trim()) {
+      return res.status(400).json({ error: "Full Name is required" });
+    }
+    if (!designation || typeof designation !== "string" || !designation.trim()) {
+      return res.status(400).json({ error: "Designation is required" });
+    }
+    if (!college_name || typeof college_name !== "string" || !college_name.trim()) {
+      return res.status(400).json({ error: "College Name is required" });
+    }
+    if (!official_email || typeof official_email !== "string" || !official_email.trim()) {
+      return res.status(400).json({ error: "Official Email is required" });
+    }
+    const cleanEmail = official_email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: "Please enter a valid Official Email address" });
+    }
+
+    if (!phone || typeof phone !== "string") {
+      return res.status(400).json({ error: "Phone number is required" });
+    }
+    const cleanPhone = phone.replace(/\D/g, "");
+    if (cleanPhone.length !== 10) {
+      return res.status(400).json({ error: "Please enter a valid 10-digit mobile number" });
+    }
+
+    if (!city || typeof city !== "string" || !city.trim()) {
+      return res.status(400).json({ error: "City is required" });
+    }
+    if (!state || typeof state !== "string" || !state.trim()) {
+      return res.status(400).json({ error: "State is required" });
+    }
+    if (!category || typeof category !== "string" || !category.trim()) {
+      return res.status(400).json({ error: "College Category is required" });
+    }
+
+    // Check duplicate pending
+    for (const reg of coordRegistrationsStore.values()) {
+      if (reg.official_email === cleanEmail && reg.status === "pending") {
+        return res.status(409).json({
+          error: "A registration with this official email has already been submitted and is currently pending admin review.",
+        });
+      }
+    }
+
+    const regId = "reg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    const newReg = {
+      id: regId,
+      full_name: full_name.trim(),
+      designation: designation.trim(),
+      college_name: college_name.trim(),
+      official_email: cleanEmail,
+      phone: cleanPhone,
+      city: city.trim(),
+      state: state.trim(),
+      category: category.trim(),
+      website: website || null,
+      remarks: remarks || null,
+      status: "pending",
+      matched_college_id: null,
+      created_at: new Date().toISOString(),
+    };
+    coordRegistrationsStore.set(regId, newReg);
+
+    return res.json({
+      success: true,
+      message: "Registration submitted successfully",
+      registration: newReg,
+    });
+  });
+
+  // Staff: List registrations
+  app.get("/api/placement-coordinators/registrations", requireStaff, (req, res) => {
+    const { status, search } = req.query;
+    let list = Array.from(coordRegistrationsStore.values());
+    if (status && status !== "all") {
+      list = list.filter((r) => r.status === status);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (r) =>
+          r.full_name.toLowerCase().includes(q) ||
+          r.college_name.toLowerCase().includes(q) ||
+          r.official_email.toLowerCase().includes(q) ||
+          r.city.toLowerCase().includes(q)
+      );
+    }
+
+    const enriched = list.map((r) => {
+      let matched = null;
+      for (const col of collegesStore.values()) {
+        if (col.name.trim().toLowerCase() === r.college_name.trim().toLowerCase()) {
+          matched = col;
+          break;
+        }
+      }
+      return { ...r, suggested_college: matched };
+    });
+
+    return res.json(enriched);
+  });
+
+  // Staff: Approve registration
+  app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, (req, res) => {
+    const reg = coordRegistrationsStore.get(req.params.id);
+    if (!reg) return res.status(404).json({ error: "Registration not found" });
+    if (reg.status === "approved") return res.status(400).json({ error: "Already approved" });
+
+    let finalCollegeId = req.body?.target_college_id;
+    if (!finalCollegeId) {
+      for (const col of collegesStore.values()) {
+        if (col.name.trim().toLowerCase() === reg.college_name.trim().toLowerCase()) {
+          finalCollegeId = col.id;
+          break;
+        }
+      }
+    }
+
+    if (!finalCollegeId) {
+      finalCollegeId = "col-" + Date.now();
+      collegesStore.set(finalCollegeId, {
+        id: finalCollegeId,
+        name: reg.college_name,
+        city: reg.city,
+        state: reg.state,
+        course: reg.category,
+        website: reg.website,
+        tpo: reg.full_name,
+        status: "Interested",
+      });
+    }
+
+    const coordId = "coord-" + Date.now();
+    placementCoordsStore.set(coordId, {
+      id: coordId,
+      college_id: finalCollegeId,
+      name: reg.full_name,
+      phone: reg.phone,
+      email: reg.official_email,
+      is_current: true,
+    });
+
+    reg.status = "approved";
+    reg.matched_college_id = finalCollegeId;
+    reg.reviewed_by = req.userProfile.id;
+    reg.reviewed_at = new Date().toISOString();
+
+    return res.json({ success: true, registration: reg, college_id: finalCollegeId });
+  });
+
+  // Staff: Reject registration
+  app.post("/api/placement-coordinators/registrations/:id/reject", requireStaff, (req, res) => {
+    const reg = coordRegistrationsStore.get(req.params.id);
+    if (!reg) return res.status(404).json({ error: "Registration not found" });
+
+    reg.status = "rejected";
+    reg.rejection_reason = req.body?.reason || null;
+    reg.reviewed_by = req.userProfile.id;
+    reg.reviewed_at = new Date().toISOString();
+
+    return res.json({ success: true, registration: reg });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  t.after(() => {
+    server.close();
+  });
+
+  async function api(path, opts = {}) {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: opts.method || "GET",
+      headers: { "Content-Type": "application/json", ...opts.headers },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const body = await res.json().catch(() => null);
+    return { status: res.status, body };
+  }
+
+  // 1. Valid public submission
+  await t.test("1. Public coordinator can submit valid registration with pending status", async () => {
+    const res = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Dr. Ananya Ray",
+        designation: "Head - Training & Placement",
+        college_name: "Kalinga Institute of Industrial Technology",
+        official_email: "tpo@kiit.ac.in",
+        phone: "9876543210",
+        city: "Bhubaneswar",
+        state: "Odisha",
+        category: "Engineering/Tech",
+        website: "https://kiit.ac.in",
+        remarks: "Looking forward to 2026 campus drives",
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.registration.status, "pending");
+    assert.equal(res.body.registration.official_email, "tpo@kiit.ac.in");
+  });
+
+  // 2. Missing required fields
+  await t.test("2. Rejects submission with missing required fields with 400", async () => {
+    const res = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Dr. Incomplete",
+        official_email: "incomplete@test.com",
+      },
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /Designation is required/i);
+  });
+
+  // 3. Invalid email format
+  await t.test("3. Rejects invalid email format with 400", async () => {
+    const res = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Dr. Test",
+        designation: "TPO",
+        college_name: "Test College",
+        official_email: "not-an-email",
+        phone: "9876543210",
+        city: "Mumbai",
+        state: "Maharashtra",
+        category: "MBA/Management",
+      },
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /valid Official Email/i);
+  });
+
+  // 4. Invalid phone number format
+  await t.test("4. Rejects invalid phone numbers with 400", async () => {
+    const res = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Dr. Test",
+        designation: "TPO",
+        college_name: "Test College",
+        official_email: "test@college.edu",
+        phone: "12345", // only 5 digits
+        city: "Mumbai",
+        state: "Maharashtra",
+        category: "MBA/Management",
+      },
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /10-digit mobile number/i);
+  });
+
+  // 5. Duplicate pending registration prevention
+  await t.test("5. Prevents duplicate pending submissions with 409 Conflict", async () => {
+    const res = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Dr. Ananya Ray",
+        designation: "Head - TPO",
+        college_name: "Kalinga Institute of Industrial Technology",
+        official_email: "tpo@kiit.ac.in",
+        phone: "9876543210",
+        city: "Bhubaneswar",
+        state: "Odisha",
+        category: "Engineering/Tech",
+      },
+    });
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /already been submitted and is currently pending/i);
+  });
+
+  // 6. Unauthorized access to admin review endpoint
+  await t.test("6. Denies unauthenticated and unauthorized roles from reading coordinator registrations", async () => {
+    const noAuth = await api("/api/placement-coordinators/registrations");
+    assert.equal(noAuth.status, 401);
+
+    const corpAuth = await api("/api/placement-coordinators/registrations", {
+      headers: { authorization: "Bearer corporate-jwt" },
+    });
+    assert.equal(corpAuth.status, 403);
+
+    const candAuth = await api("/api/placement-coordinators/registrations", {
+      headers: { authorization: "Bearer candidate-jwt" },
+    });
+    assert.equal(candAuth.status, 403);
+  });
+
+  // 7. Staff can view registrations with matching college suggestions
+  await t.test("7. Authorized staff can view coordinator registrations", async () => {
+    // Add a registration matching Sharda University
+    const subRes = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Prof. Rajiv Sen",
+        designation: "Director - TPO",
+        college_name: "Sharda University",
+        official_email: "rajiv.sen@sharda.ac.in",
+        phone: "9811223344",
+        city: "Greater Noida",
+        state: "Uttar Pradesh",
+        category: "Law",
+      },
+    });
+    assert.equal(subRes.status, 200);
+
+    const staffRes = await api("/api/placement-coordinators/registrations", {
+      headers: { authorization: "Bearer recruiter-jwt" },
+    });
+    assert.equal(staffRes.status, 200);
+    assert.ok(Array.isArray(staffRes.body));
+    const shardaReg = staffRes.body.find((r) => r.official_email === "rajiv.sen@sharda.ac.in");
+    assert.ok(shardaReg);
+    assert.equal(shardaReg.suggested_college?.id, "col-sharda", "Must detect matching existing college");
+  });
+
+  // 8. Admin approves registration with existing college match (no duplicate college created)
+  await t.test("8. Admin approves coordinator matching existing college without creating duplicate college", async () => {
+    const initialCollegeCount = collegesStore.size;
+
+    const listRes = await api("/api/placement-coordinators/registrations?search=rajiv.sen@sharda.ac.in", {
+      headers: { authorization: "Bearer admin-jwt" },
+    });
+    const reg = listRes.body[0];
+
+    const approveRes = await api(`/api/placement-coordinators/registrations/${reg.id}/approve`, {
+      method: "POST",
+      headers: { authorization: "Bearer admin-jwt" },
+    });
+    assert.equal(approveRes.status, 200);
+    assert.equal(approveRes.body.college_id, "col-sharda");
+    assert.equal(approveRes.body.registration.status, "approved");
+    assert.equal(collegesStore.size, initialCollegeCount, "Must not create duplicate college record");
+  });
+
+  // 9. Admin approves registration for a new college (creates college record and coordinator)
+  await t.test("9. Admin approves new college registration (creates college record & coordinator)", async () => {
+    const initialCollegeCount = collegesStore.size;
+
+    const listRes = await api("/api/placement-coordinators/registrations?search=tpo@kiit.ac.in", {
+      headers: { authorization: "Bearer admin-jwt" },
+    });
+    const reg = listRes.body[0];
+
+    const approveRes = await api(`/api/placement-coordinators/registrations/${reg.id}/approve`, {
+      method: "POST",
+      headers: { authorization: "Bearer admin-jwt" },
+    });
+    assert.equal(approveRes.status, 200);
+    assert.equal(approveRes.body.registration.status, "approved");
+    assert.equal(collegesStore.size, initialCollegeCount + 1, "Must create new college record for new institution");
+  });
+
+  // 10. Admin rejects registration with reason
+  await t.test("10. Admin can reject a registration with reason", async () => {
+    // Create new registration to reject
+    const subRes = await api("/api/placement-coordinator/register", {
+      method: "POST",
+      body: {
+        full_name: "Fake Coordinator",
+        designation: "TPO",
+        college_name: "Unrecognized Fake College",
+        official_email: "fake@spammydomain.xyz",
+        phone: "9988776655",
+        city: "Nowhere",
+        state: "Goa",
+        category: "Other",
+      },
+    });
+    const regId = subRes.body.registration.id;
+
+    const rejectRes = await api(`/api/placement-coordinators/registrations/${regId}/reject`, {
+      method: "POST",
+      headers: { authorization: "Bearer admin-jwt" },
+      body: { reason: "Unable to verify institution accreditation" },
+    });
+    assert.equal(rejectRes.status, 200);
+    assert.equal(rejectRes.body.registration.status, "rejected");
+    assert.equal(rejectRes.body.registration.rejection_reason, "Unable to verify institution accreditation");
+  });
+});
+
+

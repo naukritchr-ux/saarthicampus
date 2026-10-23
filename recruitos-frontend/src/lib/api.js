@@ -72,6 +72,45 @@ export async function deleteCollege(id) {
   if (error) throw error;
 }
 
+// ---------- Placement Coordinator Registrations ----------
+export async function getCoordinatorRegistrations({ status, search } = {}) {
+  const headers = await authHeaders();
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.append('status', status);
+  if (search && search.trim()) params.append('search', search.trim());
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/placement-coordinators/registrations?${params.toString()}`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch coordinator registrations');
+  return data;
+}
+
+export async function approveCoordinatorRegistration(id, { target_college_id } = {}) {
+  const headers = await authHeaders();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/placement-coordinators/registrations/${id}/approve`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_college_id }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to approve coordinator registration');
+  return data;
+}
+
+export async function rejectCoordinatorRegistration(id, { reason } = {}) {
+  const headers = await authHeaders();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/placement-coordinators/registrations/${id}/reject`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reject coordinator registration');
+  return data;
+}
+
 // ---------- Corporate Database ----------
 export async function getCompanies() {
   const { data, error } = await supabase.from('companies').select('*');

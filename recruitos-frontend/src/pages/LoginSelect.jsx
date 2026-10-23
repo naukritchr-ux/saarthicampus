@@ -224,6 +224,54 @@ export default function SaarthiCampusLanding() {
           </div>
         </div>
 
+        {/* Placement Coordinator Onboarding Banner */}
+        <div
+          style={{
+            marginTop: 32,
+            background: "rgba(255, 255, 255, 0.95)",
+            borderRadius: 16,
+            padding: "16px 24px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 16,
+            boxShadow: "0 8px 24px rgba(139, 92, 246, 0.12)",
+            border: "1px solid rgba(139, 92, 246, 0.2)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontSize: 28 }}>🎓</span>
+            <div>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: "#1e1b4b" }}>
+                College Placement Coordinator (TPO)?
+              </div>
+              <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 2 }}>
+                Partner your institution with Saarthi Campus to streamline campus drives and connect graduating students with top corporate recruiters.
+              </div>
+            </div>
+          </div>
+          <a
+            href="/placement-coordinator/register"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "#6327BD",
+              color: "#ffffff",
+              padding: "10px 18px",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 700,
+              textDecoration: "none",
+              boxShadow: "0 4px 12px rgba(99, 39, 189, 0.25)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Register as Placement Coordinator →
+          </a>
+        </div>
+
         {/* trust strip */}
         <div
           style={{

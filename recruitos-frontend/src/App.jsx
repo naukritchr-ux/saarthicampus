@@ -21,6 +21,7 @@ import ThemeToggle from "./components/ThemeToggle";
 import AptitudeTest from "./pages/AptitudeTest";
 import UserManagement from "./pages/UserManagement";
 import AuthPanel from "./components/AuthPanel";
+import PlacementCoordinatorRegister from "./pages/PlacementCoordinatorRegister";
 import CallRecord from "./pages/CallRecord";
 import SaarthiLogo from "./components/SaarthiLogo";
 import LoginSelect from "./pages/LoginSelect";
@@ -35,8 +36,6 @@ import AdminDashboard from "./pages/AdminDashboard";
 import RecruiterDashboard from "./pages/RecruiterDashboard";
 import CompanyProfile from "./pages/CompanyProfile";
 import CandidateSearch from "./pages/CandidateSearch";
-import HiringAnalytics from "./pages/HiringAnalytics";
-import RecruiterReports from "./pages/RecruiterReports";
 import CorporateReports from "./pages/CorporateReports";
 
 // Pages available to admin
@@ -222,6 +221,14 @@ export default function App() {
 
   if (window.location.pathname === "/apply") {
     return <Apply />;
+  }
+
+  if (
+    window.location.pathname === "/placement-coordinator/register" ||
+    window.location.pathname === "/placement-coordinator-register" ||
+    window.location.pathname === "/coordinator/register"
+  ) {
+    return <PlacementCoordinatorRegister />;
   }
 
   if (window.location.pathname.startsWith("/interview/")) {

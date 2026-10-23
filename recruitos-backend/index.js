@@ -2286,6 +2286,363 @@ app.post("/api/import/corporate/save", requireStaff, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ============================================================================
+// ---- PLACEMENT COORDINATOR REGISTRATION & ADMIN REVIEW ----
+// ============================================================================
+
+// In-memory rate limiting map for registration submissions (anti-abuse)
+const coordinatorRegRateLimit = new Map();
+function checkCoordinatorRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 60 * 1000; // 1 hour window
+  const limit = 10; // max 10 submissions per hour per IP
+  const record = coordinatorRegRateLimit.get(ip) || [];
+  const recent = record.filter((t) => now - t < windowMs);
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  coordinatorRegRateLimit.set(ip, recent);
+  return true;
+}
+
+// 1. Public Placement Coordinator Registration Endpoint
+app.post("/api/placement-coordinator/register", async (req, res) => {
+  try {
+    const clientIp = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
+    if (!checkCoordinatorRateLimit(clientIp)) {
+      return res.status(429).json({
+        error: "Too many registration attempts from this network. Please try again after an hour.",
+      });
+    }
+
+    const {
+      full_name,
+      designation,
+      college_name,
+      official_email,
+      phone,
+      city,
+      state,
+      category,
+      website,
+      remarks,
+    } = req.body;
+
+    // Required field validation
+    if (!full_name || typeof full_name !== "string" || !full_name.trim()) {
+      return res.status(400).json({ error: "Full Name is required" });
+    }
+    if (!designation || typeof designation !== "string" || !designation.trim()) {
+      return res.status(400).json({ error: "Designation is required" });
+    }
+    if (!college_name || typeof college_name !== "string" || !college_name.trim()) {
+      return res.status(400).json({ error: "College Name is required" });
+    }
+    if (!official_email || typeof official_email !== "string" || !official_email.trim()) {
+      return res.status(400).json({ error: "Official Email is required" });
+    }
+    const cleanEmail = official_email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: "Please enter a valid Official Email address" });
+    }
+
+    if (!phone || typeof phone !== "string") {
+      return res.status(400).json({ error: "Phone number is required" });
+    }
+    const cleanPhone = phone.replace(/\D/g, "");
+    if (cleanPhone.length !== 10) {
+      return res.status(400).json({ error: "Please enter a valid 10-digit mobile number" });
+    }
+
+    if (!city || typeof city !== "string" || !city.trim()) {
+      return res.status(400).json({ error: "City is required" });
+    }
+    if (!state || typeof state !== "string" || !state.trim()) {
+      return res.status(400).json({ error: "State is required" });
+    }
+    if (!category || typeof category !== "string" || !category.trim()) {
+      return res.status(400).json({ error: "College Category is required" });
+    }
+
+    // Check for accidental duplicate pending submission
+    const { data: existingPending } = await supabase
+      .from("coordinator_registrations")
+      .select("id, created_at")
+      .eq("official_email", cleanEmail)
+      .eq("status", "pending")
+      .maybeSingle();
+
+    if (existingPending) {
+      return res.status(409).json({
+        error: "A registration with this official email has already been submitted and is currently pending admin review. Our team will contact you shortly.",
+      });
+    }
+
+    const payload = {
+      full_name: full_name.trim(),
+      designation: designation.trim(),
+      college_name: college_name.trim(),
+      official_email: cleanEmail,
+      phone: cleanPhone,
+      city: city.trim(),
+      state: state.trim(),
+      category: category.trim(),
+      website: website && typeof website === "string" && website.trim() ? website.trim() : null,
+      remarks: remarks && typeof remarks === "string" && remarks.trim() ? remarks.trim().slice(0, 1000) : null,
+      status: "pending",
+    };
+
+    const { data, error } = await supabase
+      .from("coordinator_registrations")
+      .insert([payload])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Coordinator registration insert error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({
+      success: true,
+      message: "Registration submitted successfully! Our campus relations team will review your college details and connect with you.",
+      registration: data,
+    });
+  } catch (err) {
+    console.error("Coordinator registration error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Staff: List Coordinator Registrations with Matching College Detection
+app.get("/api/placement-coordinators/registrations", requireStaff, async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    let query = supabase
+      .from("coordinator_registrations")
+      .select("*, colleges:matched_college_id(id, name, city, state)")
+      .order("created_at", { ascending: false });
+
+    if (status && status !== "all") {
+      query = query.eq("status", status);
+    }
+    if (search && search.trim()) {
+      const q = search.trim();
+      query = query.or(
+        `full_name.ilike.%${q}%,college_name.ilike.%${q}%,official_email.ilike.%${q}%,city.ilike.%${q}%`
+      );
+    }
+
+    const { data: registrations, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Fetch all college names to detect potential matches for pending registrations
+    const { data: allColleges } = await supabase
+      .from("colleges")
+      .select("id, name, city, state, tpo, course");
+
+    const enriched = (registrations || []).map((r) => {
+      let matchedCollege = r.colleges || null;
+      if (!matchedCollege && allColleges) {
+        const directMatch = allColleges.find(
+          (c) => c.name && c.name.trim().toLowerCase() === r.college_name.trim().toLowerCase()
+        );
+        if (directMatch) {
+          matchedCollege = directMatch;
+        } else {
+          // Partial or similar match
+          const partialMatch = allColleges.find(
+            (c) =>
+              c.name &&
+              (c.name.toLowerCase().includes(r.college_name.toLowerCase()) ||
+                r.college_name.toLowerCase().includes(c.name.toLowerCase()))
+          );
+          if (partialMatch) matchedCollege = { ...partialMatch, is_partial: true };
+        }
+      }
+      return {
+        ...r,
+        suggested_college: matchedCollege,
+      };
+    });
+
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Staff: Approve Coordinator Registration & Link to College
+app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { target_college_id } = req.body || {};
+
+    const { data: reg, error: regError } = await supabase
+      .from("coordinator_registrations")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (regError || !reg) {
+      return res.status(404).json({ error: "Coordinator registration not found" });
+    }
+
+    if (reg.status === "approved") {
+      return res.status(400).json({ error: "This registration has already been approved" });
+    }
+
+    let finalCollegeId = target_college_id;
+
+    // If no target college specified by admin, look up existing college by name to avoid duplicates
+    if (!finalCollegeId) {
+      const { data: existingColleges } = await supabase
+        .from("colleges")
+        .select("id, name, tpo")
+        .ilike("name", reg.college_name.trim())
+        .limit(1);
+
+      if (existingColleges && existingColleges.length > 0) {
+        finalCollegeId = existingColleges[0].id;
+      }
+    }
+
+    // If still no matching college, create new college record in `colleges`
+    if (!finalCollegeId) {
+      const newCollegeRow = {
+        name: reg.college_name.trim(),
+        city: reg.city.trim(),
+        state: reg.state.trim(),
+        course: reg.category.trim(),
+        website: reg.website || null,
+        tpo: reg.full_name.trim(),
+        status: "Interested",
+      };
+
+      const { data: createdCollege, error: createCollegeErr } = await supabase
+        .from("colleges")
+        .insert([newCollegeRow])
+        .select()
+        .single();
+
+      if (createCollegeErr) {
+        return res.status(500).json({ error: "Failed to create college record: " + createCollegeErr.message });
+      }
+      finalCollegeId = createdCollege.id;
+    }
+
+    // Add or verify placement coordinator in `placement_coordinators`
+    const { data: existingCoords } = await supabase
+      .from("placement_coordinators")
+      .select("id")
+      .eq("college_id", finalCollegeId)
+      .or(`email.eq.${reg.official_email},name.ilike.%${reg.full_name}%`)
+      .limit(1);
+
+    if (!existingCoords || existingCoords.length === 0) {
+      await supabase.from("placement_coordinators").insert([
+        {
+          college_id: finalCollegeId,
+          name: reg.full_name.trim(),
+          phone: reg.phone,
+          email: reg.official_email,
+          is_current: true,
+          effective_from: new Date().toISOString().split("T")[0],
+          created_by: req.userProfile?.id || null,
+          created_by_name: req.userProfile?.name || "Admin",
+        },
+      ]);
+    }
+
+    // Ensure college.tpo reflects coordinator
+    const { data: colData } = await supabase
+      .from("colleges")
+      .select("tpo")
+      .eq("id", finalCollegeId)
+      .single();
+
+    if (!colData?.tpo || colData.tpo === "Not verified on source checked") {
+      await supabase
+        .from("colleges")
+        .update({ tpo: reg.full_name.trim() })
+        .eq("id", finalCollegeId);
+    }
+
+    // Mark registration approved
+    const { data: updatedReg, error: updateErr } = await supabase
+      .from("coordinator_registrations")
+      .update({
+        status: "approved",
+        matched_college_id: finalCollegeId,
+        reviewed_by: req.userProfile?.id || null,
+        reviewed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (updateErr) {
+      return res.status(500).json({ error: updateErr.message });
+    }
+
+    res.json({
+      success: true,
+      message: "Placement Coordinator registration approved and linked to college successfully",
+      registration: updatedReg,
+      college_id: finalCollegeId,
+    });
+  } catch (err) {
+    console.error("Approve coordinator error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Staff: Reject Coordinator Registration
+app.post("/api/placement-coordinators/registrations/:id/reject", requireStaff, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    const { data: reg, error: regError } = await supabase
+      .from("coordinator_registrations")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (regError || !reg) {
+      return res.status(404).json({ error: "Coordinator registration not found" });
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from("coordinator_registrations")
+      .update({
+        status: "rejected",
+        rejection_reason: reason && typeof reason === "string" ? reason.trim() : null,
+        reviewed_by: req.userProfile?.id || null,
+        reviewed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (updateErr) {
+      return res.status(500).json({ error: updateErr.message });
+    }
+
+    res.json({
+      success: true,
+      message: "Coordinator registration rejected",
+      registration: updated,
+    });
+  } catch (err) {
+    console.error("Reject coordinator error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Corporate: candidates who applied to this company's jobs
 app.get("/api/corporate/candidates", requireCorporate, async (req, res) => {
   const profile = req.userProfile;

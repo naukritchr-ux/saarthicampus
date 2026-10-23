@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { sanitizePhone } from "../lib/phone";
 import { isValidEmail } from "../lib/email";
 import AIImport from "../components/AIImport";
+import CoordinatorReview from "../components/CoordinatorReview";
 
 const courses = [
   "All",
@@ -103,6 +104,8 @@ export default function CampusDB({ user }) {
   const [customCourseText, setCustomCourseText] = useState("");
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("All Status");
+  const [activeTab, setActiveTab] = useState("colleges"); // "colleges" | "coordinators"
+  const [pendingRegistrationsCount, setPendingRegistrationsCount] = useState(0);
 
   const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -212,6 +215,14 @@ export default function CampusDB({ user }) {
         if (ignore) return;
 
         setColleges(data);
+
+        supabase
+          .from("coordinator_registrations")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending")
+          .then(({ count }) => {
+            if (!ignore && typeof count === "number") setPendingRegistrationsCount(count);
+          });
       } catch (err) {
         if (ignore) return;
 
@@ -448,7 +459,6 @@ export default function CampusDB({ user }) {
     if (!editingId) {
       for (let i = 0; i < newCoordinators.length; i++) {
         const c = newCoordinators[i];
-        const num = i + 1;
         const rowErr = {};
 
         // 1. Placement Coordinator Name (Mandatory)
@@ -1588,6 +1598,66 @@ export default function CampusDB({ user }) {
 </button>
         </div>
       </div>
+
+      {/* SECTION TABS */}
+      <div style={{ display: "flex", gap: 20, borderBottom: "1px solid var(--border-default)", marginBottom: 18 }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab("colleges")}
+          style={{
+            background: "none",
+            border: "none",
+            borderBottom: activeTab === "colleges" ? "3px solid #6327BD" : "3px solid transparent",
+            padding: "8px 4px 12px",
+            fontSize: 14,
+            fontWeight: 700,
+            color: activeTab === "colleges" ? "#6327BD" : "var(--text-muted)",
+            cursor: "pointer",
+          }}
+        >
+          🏫 Colleges Directory ({colleges.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("coordinators")}
+          style={{
+            background: "none",
+            border: "none",
+            borderBottom: activeTab === "coordinators" ? "3px solid #6327BD" : "3px solid transparent",
+            padding: "8px 4px 12px",
+            fontSize: 14,
+            fontWeight: 700,
+            color: activeTab === "coordinators" ? "#6327BD" : "var(--text-muted)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          📋 Placement Coordinator Requests
+          {pendingRegistrationsCount > 0 && (
+            <span
+              style={{
+                fontSize: 11,
+                background: "#fef3c7",
+                color: "#b45309",
+                border: "1px solid #fde68a",
+                padding: "1px 7px",
+                borderRadius: 12,
+                fontWeight: 800,
+              }}
+            >
+              {pendingRegistrationsCount} pending
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === "coordinators" ? (
+        <CoordinatorReview onPendingCountChange={setPendingRegistrationsCount} />
+      ) : (
+        <>
 
       {showImport && (
         <div className="panel">
@@ -3516,6 +3586,8 @@ export default function CampusDB({ user }) {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
