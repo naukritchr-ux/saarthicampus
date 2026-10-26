@@ -1603,7 +1603,7 @@ export default function CampusDB({ user }) {
       <div style={{ display: "flex", gap: 20, borderBottom: "1px solid var(--border-default)", marginBottom: 18 }}>
         <button
           type="button"
-          onClick={() => setActiveTab("colleges")}
+          onClick={() => { setActiveTab("colleges"); loadColleges(); }}
           style={{
             background: "none",
             border: "none",
@@ -1655,7 +1655,15 @@ export default function CampusDB({ user }) {
       </div>
 
       {activeTab === "coordinators" ? (
-        <CoordinatorReview onPendingCountChange={setPendingRegistrationsCount} />
+        <CoordinatorReview
+          onPendingCountChange={setPendingRegistrationsCount}
+          onCollegeUpdated={loadColleges}
+          onViewCollege={(collegeId, collegeName) => {
+            setActiveTab("colleges");
+            setSearch(collegeName || "");
+            loadColleges();
+          }}
+        />
       ) : (
         <>
 

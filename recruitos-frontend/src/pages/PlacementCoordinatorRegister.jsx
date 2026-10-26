@@ -3,6 +3,17 @@ import SaarthiLogo from "../components/SaarthiLogo";
 import { sanitizePhone } from "../lib/phone";
 import { isValidEmail } from "../lib/email";
 
+
+const COURSE_OPTIONS = [
+  "MBA",
+  "BBA",
+  "BCA",
+  "B.Tech",
+  "MCA",
+  "LLB",
+  "Other",
+];
+
 const CATEGORIES = [
   "MBA/Management",
   "Engineering/Tech",
@@ -39,6 +50,8 @@ const emptyForm = {
 
 export default function PlacementCoordinatorRegister() {
   const [form, setForm] = useState(emptyForm);
+  const [selectedCourses, setSelectedCourses] = useState([]);
+  const [otherCourseText, setOtherCourseText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -47,6 +60,12 @@ export default function PlacementCoordinatorRegister() {
 
   function handlePhoneChange(e) {
     setForm({ ...form, phone: sanitizePhone(e.target.value) });
+  }
+
+  function toggleCourse(course) {
+    setSelectedCourses((prev) =>
+      prev.includes(course) ? prev.filter((c) => c !== course) : [...prev, course]
+    );
   }
 
   function copyShareLink() {
@@ -95,6 +114,16 @@ export default function PlacementCoordinatorRegister() {
       return;
     }
 
+    const coursesList = selectedCourses
+      .map((c) => (c === "Other" && otherCourseText.trim() ? otherCourseText.trim() : c))
+      .filter(Boolean);
+
+    if (coursesList.length === 0) {
+      setError("Please select at least one course offered by your institution.");
+      return;
+    }
+    const coursesAvailableStr = coursesList.join(", ");
+
     setLoading(true);
 
     try {
@@ -104,7 +133,7 @@ export default function PlacementCoordinatorRegister() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, courses_available: coursesAvailableStr }),
       });
 
       const data = await res.json();
@@ -116,6 +145,7 @@ export default function PlacementCoordinatorRegister() {
         name: form.full_name,
         college: form.college_name,
         email: form.official_email,
+        courses: coursesAvailableStr,
       });
       setSubmitted(true);
     } catch (err) {
@@ -189,6 +219,9 @@ export default function PlacementCoordinatorRegister() {
             }}
           >
             <div>• Confirmation email sent to: <strong>{submittedData?.email}</strong></div>
+            {submittedData?.courses && (
+              <div>• Courses Offered: <strong>{submittedData.courses}</strong></div>
+            )}
             <div>• Our campus relations team will verify your institution and connect with you.</div>
             <div>• Status: <span style={{ color: "#d97706", fontWeight: 700 }}>Pending Admin Review</span></div>
           </div>
@@ -197,6 +230,8 @@ export default function PlacementCoordinatorRegister() {
             <button
               onClick={() => {
                 setForm(emptyForm);
+                setSelectedCourses([]);
+                setOtherCourseText("");
                 setSubmitted(false);
               }}
               style={{
@@ -512,6 +547,61 @@ export default function PlacementCoordinatorRegister() {
             </div>
           </div>
 
+                    {/* Courses Available Multi-Select */}
+          <div>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
+              Courses Available * <span style={{ fontSize: 11, fontWeight: 500, color: "#64748b" }}>(Select all degree programs offered)</span>
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: selectedCourses.includes("Other") ? 8 : 0 }}>
+              {COURSE_OPTIONS.map((course) => {
+                const isSelected = selectedCourses.includes(course);
+                return (
+                  <button
+                    key={course}
+                    type="button"
+                    onClick={() => toggleCourse(course)}
+                    style={{
+                      padding: "7px 14px",
+                      borderRadius: 20,
+                      fontSize: 13,
+                      fontWeight: isSelected ? 700 : 500,
+                      border: isSelected ? "1.5px solid #6327BD" : "1px solid #cbd5e1",
+                      background: isSelected ? "#ede9fe" : "#f8fafc",
+                      color: isSelected ? "#6327BD" : "#334155",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease-in-out",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                    }}
+                  >
+                    {isSelected ? "✓" : "+"} {course}
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedCourses.includes("Other") && (
+              <div style={{ marginTop: 8 }}>
+                <input
+                  type="text"
+                  value={otherCourseText}
+                  onChange={(e) => setOtherCourseText(e.target.value)}
+                  placeholder="Specify other courses (e.g. B.Com, M.Tech, Pharmacy, B.Des)..."
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #a78bfa",
+                    background: "#faf5ff",
+                    fontSize: 13,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
           {/* Remarks */}
           <div>
             <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
@@ -555,13 +645,6 @@ export default function PlacementCoordinatorRegister() {
             >
               {loading ? "Submitting Registration…" : "Submit Coordinator Registration"}
             </button>
-          </div>
-
-          <div style={{ textAlign: "center", fontSize: 12, color: "#64748b", marginTop: 4 }}>
-            Already have an active coordinator account?{" "}
-            <a href="/login" style={{ color: "#6327BD", fontWeight: 600, textDecoration: "none" }}>
-              Sign In
-            </a>
           </div>
         </form>
       </div>

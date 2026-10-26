@@ -2292,6 +2292,7 @@ app.post("/api/import/corporate/save", requireStaff, async (req, res) => {
 // ============================================================================
 
 // In-memory rate limiting map for registration submissions (anti-abuse)
+const { findCollegeMatches, mergeCourses } = require("./collegeMatcher");
 const coordinatorRegRateLimit = new Map();
 function checkCoordinatorRateLimit(ip) {
   const now = Date.now();
@@ -2421,7 +2422,7 @@ app.get("/api/placement-coordinators/registrations", requireStaff, async (req, r
     const { status, search } = req.query;
     let query = supabase
       .from("coordinator_registrations")
-      .select("*, colleges:matched_college_id(id, name, city, state)")
+      .select("*, colleges:matched_college_id(id, name, city, state, course, website, tpo)")
       .order("created_at", { ascending: false });
 
     if (status && status !== "all") {
@@ -2437,33 +2438,23 @@ app.get("/api/placement-coordinators/registrations", requireStaff, async (req, r
     const { data: registrations, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
 
-    // Fetch all college names to detect potential matches for pending registrations
+    // Fetch all existing colleges to accurately detect potential matches
     const { data: allColleges } = await supabase
       .from("colleges")
-      .select("id, name, city, state, tpo, course");
+      .select("id, name, city, state, tpo, course, website");
 
     const enriched = (registrations || []).map((r) => {
       let matchedCollege = r.colleges || null;
+      let potentialMatches = [];
       if (!matchedCollege && allColleges) {
-        const directMatch = allColleges.find(
-          (c) => c.name && c.name.trim().toLowerCase() === r.college_name.trim().toLowerCase()
-        );
-        if (directMatch) {
-          matchedCollege = directMatch;
-        } else {
-          // Partial or similar match
-          const partialMatch = allColleges.find(
-            (c) =>
-              c.name &&
-              (c.name.toLowerCase().includes(r.college_name.toLowerCase()) ||
-                r.college_name.toLowerCase().includes(c.name.toLowerCase()))
-          );
-          if (partialMatch) matchedCollege = { ...partialMatch, is_partial: true };
-        }
+        const matchResult = findCollegeMatches(r.college_name, r.city, r.state, allColleges);
+        matchedCollege = matchResult.suggested_college;
+        potentialMatches = matchResult.potential_matches;
       }
       return {
         ...r,
         suggested_college: matchedCollege,
+        potential_matches: potentialMatches,
       };
     });
 
@@ -2477,8 +2468,9 @@ app.get("/api/placement-coordinators/registrations", requireStaff, async (req, r
 app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, async (req, res) => {
   try {
     const { id } = req.params;
-    const { target_college_id } = req.body || {};
+    const { target_college_id, create_new } = req.body || {};
 
+    // 1. Fetch registration
     const { data: reg, error: regError } = await supabase
       .from("coordinator_registrations")
       .select("*")
@@ -2489,32 +2481,70 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
       return res.status(404).json({ error: "Coordinator registration not found" });
     }
 
+    // Idempotency check: prevent duplicate approvals
     if (reg.status === "approved") {
-      return res.status(400).json({ error: "This registration has already been approved" });
+      return res.status(400).json({
+        error: "This registration has already been approved",
+        already_approved: true,
+        college_id: reg.matched_college_id,
+      });
     }
 
-    let finalCollegeId = target_college_id;
+    // 2. Try PostgreSQL atomic stored function if available
+    try {
+      const { data: rpcResult, error: rpcError } = await supabase.rpc(
+        "approve_coordinator_registration",
+        {
+          p_registration_id: id,
+          p_target_college_id: target_college_id || null,
+          p_create_new: Boolean(create_new),
+          p_reviewer_id: req.userProfile?.id || null,
+          p_reviewer_name: req.userProfile?.name || "Admin",
+        }
+      );
 
-    // If no target college specified by admin, look up existing college by name to avoid duplicates
-    if (!finalCollegeId) {
-      const { data: existingColleges } = await supabase
+      if (!rpcError && rpcResult && rpcResult.success) {
+        return res.json({
+          success: true,
+          message: rpcResult.message,
+          college_id: rpcResult.college_id,
+          is_new_college: Boolean(rpcResult.is_new_college),
+          registration: {
+            ...reg,
+            status: "approved",
+            matched_college_id: rpcResult.college_id,
+          },
+        });
+      }
+    } catch (rpcErr) {
+      console.warn("RPC approve_coordinator_registration unavailable, running backend handler:", rpcErr.message);
+    }
+
+    // 3. Backend fallback sequence
+    let finalCollegeId = target_college_id || null;
+    let isNewCollege = false;
+
+    // If admin explicitly requested create_new or no target specified:
+    if (!finalCollegeId && !create_new) {
+      const { data: allColleges } = await supabase
         .from("colleges")
-        .select("id, name, tpo")
-        .ilike("name", reg.college_name.trim())
-        .limit(1);
+        .select("id, name, city, state, course, website, tpo");
 
-      if (existingColleges && existingColleges.length > 0) {
-        finalCollegeId = existingColleges[0].id;
+      const matchResult = findCollegeMatches(reg.college_name, reg.city, reg.state, allColleges || []);
+      if (matchResult.suggested_college && matchResult.suggested_college.score >= 70) {
+        finalCollegeId = matchResult.suggested_college.id;
       }
     }
 
-    // If still no matching college, create new college record in `colleges`
+    // If still no matching college or create_new was requested:
     if (!finalCollegeId) {
       const newCollegeRow = {
         name: reg.college_name.trim(),
         city: reg.city.trim(),
         state: reg.state.trim(),
         course: reg.category.trim(),
+        institution_type: reg.category.trim(),
+        courses_available: reg.courses_available || null,
         website: reg.website || null,
         tpo: reg.full_name.trim(),
         status: "Interested",
@@ -2530,46 +2560,119 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
         return res.status(500).json({ error: "Failed to create college record: " + createCollegeErr.message });
       }
       finalCollegeId = createdCollege.id;
+      isNewCollege = true;
+    } else {
+      // Existing college: update missing metadata fields safely without overwriting
+      const { data: existingCol } = await supabase
+        .from("colleges")
+        .select("city, state, website, course, institution_type, courses_available")
+        .eq("id", finalCollegeId)
+        .single();
+
+      if (existingCol) {
+        const patch = {};
+        if (!existingCol.city && reg.city) patch.city = reg.city.trim();
+        if (!existingCol.state && reg.state) patch.state = reg.state.trim();
+        if (!existingCol.website && reg.website) patch.website = reg.website.trim();
+        if (!existingCol.course && reg.category) patch.course = reg.category.trim();
+        if (!existingCol.institution_type && reg.category) patch.institution_type = reg.category.trim();
+
+        // Merge courses_available without deleting existing courses or creating duplicates
+        const mergedCourses = mergeCourses(existingCol.courses_available, reg.courses_available);
+        if (mergedCourses && mergedCourses !== existingCol.courses_available) {
+          patch.courses_available = mergedCourses;
+        }
+
+        if (Object.keys(patch).length > 0) {
+          await supabase.from("colleges").update(patch).eq("id", finalCollegeId);
+        }
+      }
     }
 
-    // Add or verify placement coordinator in `placement_coordinators`
+    // 4. Check for existing coordinator in `placement_coordinators` to prevent duplicate coordinator rows
     const { data: existingCoords } = await supabase
       .from("placement_coordinators")
-      .select("id")
+      .select("id, is_current")
       .eq("college_id", finalCollegeId)
-      .or(`email.eq.${reg.official_email},name.ilike.%${reg.full_name}%`)
+      .or(`email.eq.${reg.official_email},phone.eq.${reg.phone}`)
       .limit(1);
 
+    let coordId = existingCoords?.[0]?.id;
+
     if (!existingCoords || existingCoords.length === 0) {
-      await supabase.from("placement_coordinators").insert([
-        {
-          college_id: finalCollegeId,
-          name: reg.full_name.trim(),
-          phone: reg.phone,
-          email: reg.official_email,
-          is_current: true,
-          effective_from: new Date().toISOString().split("T")[0],
-          created_by: req.userProfile?.id || null,
-          created_by_name: req.userProfile?.name || "Admin",
-        },
-      ]);
+      const { data: newCoordRows, error: coordErr } = await supabase
+        .from("placement_coordinators")
+        .insert([
+          {
+            college_id: finalCollegeId,
+            name: reg.full_name.trim(),
+            phone: reg.phone,
+            email: reg.official_email,
+            is_current: true,
+            effective_from: new Date().toISOString().split("T")[0],
+            created_by: req.userProfile?.id || null,
+            created_by_name: req.userProfile?.name || "Admin",
+          },
+        ])
+        .select();
+
+      if (!coordErr && newCoordRows?.[0]) {
+        coordId = newCoordRows[0].id;
+      }
+
+      // Record audit history if table exists
+      try {
+        await supabase.from("placement_coordinator_history").insert([
+          {
+            college_id: finalCollegeId,
+            coordinator_id: coordId,
+            action: "CREATED",
+            previous_values: null,
+            new_values: {
+              name: reg.full_name.trim(),
+              phone: reg.phone,
+              email: reg.official_email,
+              source: "coordinator_registration",
+              registration_id: reg.id,
+            },
+            changed_at: new Date().toISOString(),
+            changed_by: req.userProfile?.id || null,
+            changed_by_name: req.userProfile?.name || "Admin",
+          },
+        ]);
+      } catch (histErr) {
+        console.warn("Audit history insert non-fatal:", histErr.message);
+      }
+    } else if (existingCoords[0] && !existingCoords[0].is_current) {
+      // Reactivate if previously marked retired
+      await supabase
+        .from("placement_coordinators")
+        .update({ is_current: true, ended_at: null, updated_at: new Date().toISOString() })
+        .eq("id", coordId);
     }
 
-    // Ensure college.tpo reflects coordinator
-    const { data: colData } = await supabase
-      .from("colleges")
-      .select("tpo")
-      .eq("id", finalCollegeId)
-      .single();
+    // 5. Synchronize colleges.tpo with all active coordinators
+    const { data: activeCoords } = await supabase
+      .from("placement_coordinators")
+      .select("name")
+      .eq("college_id", finalCollegeId)
+      .eq("is_current", true)
+      .order("created_at", { ascending: true });
 
-    if (!colData?.tpo || colData.tpo === "Not verified on source checked") {
+    const activeNames = [];
+    (activeCoords || []).forEach((c) => {
+      const n = (c.name || "").trim();
+      if (n && !activeNames.includes(n)) activeNames.push(n);
+    });
+
+    if (activeNames.length > 0) {
       await supabase
         .from("colleges")
-        .update({ tpo: reg.full_name.trim() })
+        .update({ tpo: activeNames.join(", ") })
         .eq("id", finalCollegeId);
     }
 
-    // Mark registration approved
+    // 6. Mark coordinator registration approved
     const { data: updatedReg, error: updateErr } = await supabase
       .from("coordinator_registrations")
       .update({
@@ -2589,9 +2692,12 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
 
     res.json({
       success: true,
-      message: "Placement Coordinator registration approved and linked to college successfully",
+      message: isNewCollege
+        ? "New college created and placement coordinator linked successfully"
+        : "Placement Coordinator registration approved and linked to existing college directory record",
       registration: updatedReg,
       college_id: finalCollegeId,
+      is_new_college: isNewCollege,
     });
   } catch (err) {
     console.error("Approve coordinator error:", err);

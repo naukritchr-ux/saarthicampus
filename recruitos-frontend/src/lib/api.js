@@ -85,13 +85,13 @@ export async function getCoordinatorRegistrations({ status, search } = {}) {
   return data;
 }
 
-export async function approveCoordinatorRegistration(id, { target_college_id } = {}) {
+export async function approveCoordinatorRegistration(id, { target_college_id, create_new } = {}) {
   const headers = await authHeaders();
   const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
   const res = await fetch(`${backendUrl}/api/placement-coordinators/registrations/${id}/approve`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target_college_id }),
+    body: JSON.stringify({ target_college_id, create_new }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to approve coordinator registration');

@@ -4,6 +4,7 @@ import {
   approveCoordinatorRegistration,
   rejectCoordinatorRegistration,
 } from "../lib/api";
+import { supabase } from "../lib/supabaseClient";
 
 function formatDate(isoString) {
   if (!isoString) return "—";
@@ -22,16 +23,26 @@ function formatDate(isoString) {
   }
 }
 
-export default function CoordinatorReview({ onPendingCountChange }) {
+export default function CoordinatorReview({ onPendingCountChange, onCollegeUpdated, onViewCollege }) {
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [successBanner, setSuccessBanner] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [selectedRemarks, setSelectedRemarks] = useState(null);
+
+  // Approval modal states
+  const [approvalModalReg, setApprovalModalReg] = useState(null);
+  const [approvalType, setApprovalType] = useState("matched"); // 'matched' | 'select' | 'new'
+  const [selectedTargetCollegeId, setSelectedTargetCollegeId] = useState("");
+  const [allCollegesList, setAllCollegesList] = useState([]);
+  const [collegeSearchFilter, setCollegeSearchFilter] = useState("");
+  const [modalSubmitting, setModalSubmitting] = useState(false);
+  const [modalError, setModalError] = useState("");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -52,9 +63,19 @@ export default function CoordinatorReview({ onPendingCountChange }) {
   }, [statusFilter, search, onPendingCountChange]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
+
+  // Load all colleges for manual selection option in approval modal
+  useEffect(() => {
+    supabase
+      .from("colleges")
+      .select("id, name, city, state")
+      .order("name", { ascending: true })
+      .then(({ data }) => {
+        if (data) setAllCollegesList(data);
+      });
+  }, []);
 
   const copyPublicLink = () => {
     const origin = window.location.origin;
@@ -65,23 +86,60 @@ export default function CoordinatorReview({ onPendingCountChange }) {
     });
   };
 
-  const handleApprove = async (reg) => {
-    const confirmMsg = reg.suggested_college
-      ? `Approve registration for ${reg.full_name} and link to existing college "${reg.suggested_college.name}"?`
-      : `Approve registration for ${reg.full_name} and create new college "${reg.college_name}" in database?`;
+  const openApproveModal = (reg) => {
+    setApprovalModalReg(reg);
+    setModalError("");
+    setCollegeSearchFilter("");
 
-    if (!window.confirm(confirmMsg)) return;
+    const topMatch = reg.suggested_college || reg.potential_matches?.[0];
+    if (topMatch) {
+      setApprovalType("matched");
+      setSelectedTargetCollegeId(topMatch.id);
+    } else {
+      setApprovalType("new");
+      setSelectedTargetCollegeId("");
+    }
+  };
 
-    setActionLoadingId(reg.id);
+  const handleConfirmApprove = async () => {
+    if (!approvalModalReg) return;
+    setModalSubmitting(true);
+    setModalError("");
+
     try {
-      await approveCoordinatorRegistration(reg.id, {
-        target_college_id: reg.suggested_college?.id || undefined,
+      let targetCollegeId = undefined;
+      let createNew = false;
+
+      if (approvalType === "matched") {
+        targetCollegeId = selectedTargetCollegeId || approvalModalReg.suggested_college?.id;
+      } else if (approvalType === "select") {
+        if (!selectedTargetCollegeId) {
+          throw new Error("Please select an existing college from the list.");
+        }
+        targetCollegeId = selectedTargetCollegeId;
+      } else if (approvalType === "new") {
+        createNew = true;
+      }
+
+      const res = await approveCoordinatorRegistration(approvalModalReg.id, {
+        target_college_id: targetCollegeId,
+        create_new: createNew,
       });
+
+      setSuccessBanner(
+        res.is_new_college
+          ? `✓ Approved ${approvalModalReg.full_name} and created new college record for "${approvalModalReg.college_name}" in the Colleges Directory!`
+          : `✓ Approved ${approvalModalReg.full_name} and linked to existing college directory record!`
+      );
+      setTimeout(() => setSuccessBanner(""), 6000);
+
+      setApprovalModalReg(null);
       await loadData();
+      if (onCollegeUpdated) onCollegeUpdated();
     } catch (err) {
-      alert("Approval failed: " + err.message);
+      setModalError(err.message || "Approval failed");
     } finally {
-      setActionLoadingId(null);
+      setModalSubmitting(false);
     }
   };
 
@@ -94,6 +152,8 @@ export default function CoordinatorReview({ onPendingCountChange }) {
     setActionLoadingId(reg.id);
     try {
       await rejectCoordinatorRegistration(reg.id, { reason: reason.trim() });
+      setSuccessBanner(`Coordinator registration for ${reg.full_name} rejected.`);
+      setTimeout(() => setSuccessBanner(""), 5000);
       await loadData();
     } catch (err) {
       alert("Rejection failed: " + err.message);
@@ -126,6 +186,14 @@ export default function CoordinatorReview({ onPendingCountChange }) {
     ];
   }, [registrations]);
 
+  const filteredCollegesForDropdown = useMemo(() => {
+    if (!collegeSearchFilter.trim()) return allCollegesList.slice(0, 50);
+    const q = collegeSearchFilter.toLowerCase().trim();
+    return allCollegesList
+      .filter((c) => c.name?.toLowerCase().includes(q) || c.city?.toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [allCollegesList, collegeSearchFilter]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Top Banner & Stats */}
@@ -147,7 +215,7 @@ export default function CoordinatorReview({ onPendingCountChange }) {
             Placement Coordinator Registration Requests
           </h3>
           <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "#64748b" }}>
-            Review and approve public onboarding submissions from college placement coordinators (TPOs).
+            Review, verify, and connect public coordinator onboarding submissions with the Colleges Directory.
           </p>
         </div>
 
@@ -184,6 +252,33 @@ export default function CoordinatorReview({ onPendingCountChange }) {
         </div>
       </div>
 
+      {/* Success Notification Banner */}
+      {successBanner && (
+        <div
+          style={{
+            background: "#dcfce7",
+            color: "#166534",
+            border: "1px solid #86efac",
+            padding: "12px 16px",
+            borderRadius: 8,
+            fontSize: 13.5,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>{successBanner}</span>
+          <button
+            type="button"
+            onClick={() => setSuccessBanner("")}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "#166534" }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div
         style={{
@@ -219,7 +314,7 @@ export default function CoordinatorReview({ onPendingCountChange }) {
           <div style={{ fontSize: 24, fontWeight: 800, color: "#047857", margin: "4px 0" }}>
             {stats.approved}
           </div>
-          <div style={{ fontSize: 11.5, color: "#047857" }}>Active coordinators</div>
+          <div style={{ fontSize: 11.5, color: "#047857" }}>Active in Colleges Directory</div>
         </div>
 
         <div className="panel" style={{ padding: "14px 18px", margin: 0, borderLeft: "4px solid #ef4444" }}>
@@ -297,7 +392,7 @@ export default function CoordinatorReview({ onPendingCountChange }) {
                 <th style={{ padding: "12px 16px" }}>College & Category</th>
                 <th style={{ padding: "12px 16px" }}>Contact Details</th>
                 <th style={{ padding: "12px 16px" }}>Location</th>
-                <th style={{ padding: "12px 16px" }}>College Matching</th>
+                <th style={{ padding: "12px 16px" }}>Directory Matching</th>
                 <th style={{ padding: "12px 16px" }}>Submitted At</th>
                 <th style={{ padding: "12px 16px" }}>Status</th>
                 <th style={{ padding: "12px 16px" }}>Actions</th>
@@ -363,6 +458,26 @@ export default function CoordinatorReview({ onPendingCountChange }) {
                             </a>
                           )}
                         </div>
+                        {reg.courses_available && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+                            {reg.courses_available.split(/[;,]/).map((c, i) => (
+                              <span
+                                key={i}
+                                style={{
+                                  fontSize: 10.5,
+                                  background: "#f1f5f9",
+                                  color: "#334155",
+                                  border: "1px solid #e2e8f0",
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {c.trim()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </td>
 
                       {/* Contact */}
@@ -391,34 +506,44 @@ export default function CoordinatorReview({ onPendingCountChange }) {
                       {/* Matching College */}
                       <td style={{ padding: "12px 16px" }}>
                         {reg.status === "approved" && reg.colleges ? (
-                          <span
-                            style={{
-                              fontSize: 11.5,
-                              color: "#166534",
-                              background: "#dcfce7",
-                              padding: "2px 8px",
-                              borderRadius: 4,
-                              fontWeight: 600,
-                              display: "inline-block",
-                            }}
-                          >
-                            🏢 Linked: {reg.colleges.name}
-                          </span>
+                          <div>
+                            <span
+                              style={{
+                                fontSize: 11.5,
+                                color: "#166534",
+                                background: "#dcfce7",
+                                padding: "2px 8px",
+                                borderRadius: 4,
+                                fontWeight: 600,
+                                display: "inline-block",
+                              }}
+                            >
+                              🏢 Linked: {reg.colleges.name}
+                            </span>
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
+                              {reg.colleges.city || reg.city}
+                            </div>
+                          </div>
                         ) : reg.suggested_college ? (
-                          <span
-                            title={`College ID: ${reg.suggested_college.id}`}
-                            style={{
-                              fontSize: 11.5,
-                              color: "#0369a1",
-                              background: "#e0f2fe",
-                              padding: "2px 8px",
-                              borderRadius: 4,
-                              fontWeight: 600,
-                              display: "inline-block",
-                            }}
-                          >
-                            🏢 Matches: {reg.suggested_college.name}
-                          </span>
+                          <div>
+                            <span
+                              title={reg.suggested_college.match_reason || `Matched: ${reg.suggested_college.name}`}
+                              style={{
+                                fontSize: 11.5,
+                                color: "#0369a1",
+                                background: "#e0f2fe",
+                                padding: "2px 8px",
+                                borderRadius: 4,
+                                fontWeight: 600,
+                                display: "inline-block",
+                              }}
+                            >
+                              🏢 Match: {reg.suggested_college.name}
+                            </span>
+                            <div style={{ fontSize: 11, color: "#0284c7", marginTop: 2 }}>
+                              {reg.suggested_college.match_reason || `${reg.suggested_college.score}% confidence`}
+                            </div>
+                          </div>
                         ) : (
                           <span
                             style={{
@@ -488,14 +613,13 @@ export default function CoordinatorReview({ onPendingCountChange }) {
                           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                             <button
                               type="button"
-                              onClick={() => handleApprove(reg)}
+                              onClick={() => openApproveModal(reg)}
                               disabled={isActing}
-                              title={reg.suggested_college ? "Approve & Link to existing college" : "Approve & Create new college"}
                               style={{
                                 background: "#16a34a",
                                 color: "#fff",
                                 border: "none",
-                                padding: "4px 10px",
+                                padding: "5px 12px",
                                 borderRadius: 6,
                                 fontSize: 12,
                                 fontWeight: 700,
@@ -503,7 +627,7 @@ export default function CoordinatorReview({ onPendingCountChange }) {
                                 opacity: isActing ? 0.7 : 1,
                               }}
                             >
-                              {isActing ? "…" : "Approve"}
+                              Approve
                             </button>
 
                             <button
@@ -526,6 +650,21 @@ export default function CoordinatorReview({ onPendingCountChange }) {
                               Reject
                             </button>
                           </div>
+                        ) : reg.status === "approved" && reg.colleges && onViewCollege ? (
+                          <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={() => onViewCollege(reg.colleges.id, reg.colleges.name)}
+                            style={{
+                              padding: "4px 9px",
+                              fontSize: 11.5,
+                              color: "#4338ca",
+                              borderColor: "#c7d2fe",
+                              background: "#eef2ff",
+                            }}
+                          >
+                            View in Directory ↗
+                          </button>
                         ) : (
                           <span style={{ fontSize: 12, color: "#94a3b8" }}>—</span>
                         )}
@@ -538,6 +677,360 @@ export default function CoordinatorReview({ onPendingCountChange }) {
           </table>
         </div>
       </div>
+
+      {/* APPROVAL MODAL */}
+      {approvalModalReg && (
+        <div
+          onClick={() => !modalSubmitting && setApprovalModalReg(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.6)",
+            backdropFilter: "blur(2px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#ffffff",
+              borderRadius: 16,
+              width: 580,
+              maxWidth: "100%",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)",
+              border: "1px solid #e2e8f0",
+              padding: "24px 28px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>
+                  Approve Placement Coordinator
+                </h3>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>
+                  Verify institution linkage to keep the Colleges Directory accurate.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !modalSubmitting && setApprovalModalReg(null)}
+                style={{ background: "none", border: "none", fontSize: 20, color: "#94a3b8", cursor: "pointer" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Coordinator Details Card */}
+            <div
+              style={{
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: 10,
+                padding: "14px 16px",
+                marginBottom: 18,
+                fontSize: 13,
+                color: "#334155",
+              }}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <span style={{ color: "#64748b", fontSize: 11.5, display: "block" }}>COORDINATOR</span>
+                  <strong style={{ color: "#0f172a" }}>{approvalModalReg.full_name}</strong>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>{approvalModalReg.designation}</div>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b", fontSize: 11.5, display: "block" }}>CONTACT</span>
+                  <div>✉️ {approvalModalReg.official_email}</div>
+                  <div>📞 {approvalModalReg.phone}</div>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b", fontSize: 11.5, display: "block" }}>SUBMITTED COLLEGE</span>
+                  <strong style={{ color: "#0f172a" }}>{approvalModalReg.college_name}</strong>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    {approvalModalReg.city}, {approvalModalReg.state}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b", fontSize: 11.5, display: "block" }}>CATEGORY & WEBSITE</span>
+                  <div>{approvalModalReg.category}</div>
+                  <div style={{ fontSize: 12, color: "#2563eb" }}>
+                    {approvalModalReg.website ? (
+                      <a href={approvalModalReg.website} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>
+                        {approvalModalReg.website} ↗
+                      </a>
+                    ) : (
+                      "No website provided"
+                    )}
+                  </div>
+                </div>
+                {approvalModalReg.courses_available && (
+                  <div style={{ gridColumn: "1 / -1", marginTop: 4, paddingTop: 8, borderTop: "1px dashed #e2e8f0" }}>
+                    <span style={{ color: "#64748b", fontSize: 11.5, display: "block" }}>COURSES OFFERED</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 4 }}>
+                      {approvalModalReg.courses_available.split(/[;,]/).map((c, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            fontSize: 11,
+                            background: "#ede9fe",
+                            color: "#6d28d9",
+                            padding: "2px 7px",
+                            borderRadius: 4,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {c.trim()}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                      ℹ On approval, courses will be merged with the college directory record without duplicates.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Matching Options */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>
+                College Directory Action:
+              </label>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Option A: Suggested Matches */}
+                {(approvalModalReg.potential_matches || []).length > 0 && (
+                  <div
+                    style={{
+                      border: approvalType === "matched" ? "2px solid #3b82f6" : "1px solid #e2e8f0",
+                      background: approvalType === "matched" ? "#eff6ff" : "#ffffff",
+                      borderRadius: 10,
+                      padding: "12px 14px",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      setApprovalType("matched");
+                      if (!selectedTargetCollegeId && approvalModalReg.potential_matches[0]) {
+                        setSelectedTargetCollegeId(approvalModalReg.potential_matches[0].id);
+                      }
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="radio"
+                        name="approval_type"
+                        checked={approvalType === "matched"}
+                        onChange={() => setApprovalType("matched")}
+                      />
+                      <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13.5 }}>
+                        Link to Matched Existing College
+                      </span>
+                    </div>
+
+                    <div style={{ marginTop: 8, paddingLeft: 24, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {approvalModalReg.potential_matches.map((m) => (
+                        <label
+                          key={m.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "6px 10px",
+                            borderRadius: 6,
+                            background: selectedTargetCollegeId === m.id ? "#dbeafe" : "#f8fafc",
+                            cursor: "pointer",
+                            fontSize: 12.5,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <input
+                              type="radio"
+                              name="matched_candidate"
+                              value={m.id}
+                              checked={selectedTargetCollegeId === m.id}
+                              onChange={() => {
+                                setApprovalType("matched");
+                                setSelectedTargetCollegeId(m.id);
+                              }}
+                            />
+                            <strong>{m.name}</strong> ({m.city || "No city"})
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: "#1d4ed8",
+                              background: "#bfdbfe",
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            {m.score}% Match
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Option B: Choose Other College from Directory */}
+                <div
+                  style={{
+                    border: approvalType === "select" ? "2px solid #3b82f6" : "1px solid #e2e8f0",
+                    background: approvalType === "select" ? "#eff6ff" : "#ffffff",
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setApprovalType("select")}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="approval_type"
+                      checked={approvalType === "select"}
+                      onChange={() => setApprovalType("select")}
+                    />
+                    <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13.5 }}>
+                      Search & Link to Another College in Directory
+                    </span>
+                  </div>
+
+                  {approvalType === "select" && (
+                    <div style={{ marginTop: 10, paddingLeft: 24 }}>
+                      <input
+                        type="text"
+                        placeholder="Type to filter directory colleges…"
+                        value={collegeSearchFilter}
+                        onChange={(e) => setCollegeSearchFilter(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "6px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #cbd5e1",
+                          fontSize: 12.5,
+                          marginBottom: 6,
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <select
+                        size={5}
+                        value={selectedTargetCollegeId}
+                        onChange={(e) => setSelectedTargetCollegeId(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "6px",
+                          borderRadius: 6,
+                          border: "1px solid #cbd5e1",
+                          fontSize: 12.5,
+                          background: "#fff",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        {filteredCollegesForDropdown.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} {c.city ? `(${c.city})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Option C: Confirm Institution is Genuinely New */}
+                <div
+                  style={{
+                    border: approvalType === "new" ? "2px solid #10b981" : "1px solid #e2e8f0",
+                    background: approvalType === "new" ? "#f0fdf4" : "#ffffff",
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setApprovalType("new");
+                    setSelectedTargetCollegeId("");
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="approval_type"
+                      checked={approvalType === "new"}
+                      onChange={() => {
+                        setApprovalType("new");
+                        setSelectedTargetCollegeId("");
+                      }}
+                    />
+                    <div>
+                      <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13.5 }}>
+                        Confirm Institution is Genuinely New
+                      </span>
+                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                        Create one new record in Colleges Directory for "{approvalModalReg.college_name}"
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {modalError && (
+              <div
+                style={{
+                  background: "#fef2f2",
+                  color: "#b91c1c",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  fontSize: 12.5,
+                  marginBottom: 16,
+                }}
+              >
+                ⚠️ {modalError}
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => setApprovalModalReg(null)}
+                disabled={modalSubmitting}
+                style={{ padding: "8px 16px", fontSize: 13 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmApprove}
+                disabled={modalSubmitting}
+                style={{
+                  background: "#16a34a",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 18px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: modalSubmitting ? "not-allowed" : "pointer",
+                  opacity: modalSubmitting ? 0.7 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {modalSubmitting ? "Approving & Linking…" : "Confirm Approval"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Remarks Modal */}
       {selectedRemarks && (
