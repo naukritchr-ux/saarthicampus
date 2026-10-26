@@ -265,11 +265,7 @@ export default function PlacementCoordinatorRegister() {
       .map((c) => (c === "Other" && otherCourseText.trim() ? otherCourseText.trim() : c))
       .filter(Boolean);
 
-    if (coursesList.length === 0) {
-      setError("Please select at least one course offered by your institution.");
-      return;
-    }
-    const coursesAvailableStr = coursesList.join(", ");
+    const coursesAvailableStr = coursesList.length > 0 ? coursesList.join(", ") : null;
 
     setLoading(true);
 
@@ -1130,7 +1126,7 @@ export default function PlacementCoordinatorRegister() {
           {/* Courses Available Multi-Select */}
           <div>
             <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
-              Courses Available * <span style={{ fontSize: 11, fontWeight: 500, color: "#64748b" }}>(Select all degree programs offered)</span>
+              Courses Available <span style={{ fontSize: 11, fontWeight: 500, color: "#64748b" }}>(Optional - select degree programs offered)</span>
             </label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: selectedCourses.includes("Other") ? 8 : 0 }}>
               {COURSE_OPTIONS.map((course) => {

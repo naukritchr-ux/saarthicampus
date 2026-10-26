@@ -1,6 +1,6 @@
 // =============================================================================
 // Comprehensive Test Suite: Connect Placement Coordinator Approval with Colleges Directory,
-// Courses Available Multi-Select Functionality & Searchable College Dropdown
+// Optional Courses Available Multi-Select & Searchable College Dropdown
 // File: scripts/test_coordinator_approval_integration.js
 // =============================================================================
 
@@ -78,6 +78,10 @@ async function runTests() {
   assert(registerCode.includes("toggleCourse"), "Registration has multi-select toggle function");
   assert(registerCode.includes("otherCourseText"), "Registration has Other course text input");
 
+  // Optional Courses Verification (Requirements 1 & 2)
+  assert(!registerCode.includes("Please select at least one course offered by your institution"), "Mandatory validation removed: registration does not block submission when no courses are selected");
+  assert(registerCode.includes("Optional - select degree programs offered"), "Registration UI label displays '(Optional - select degree programs offered)'");
+
   // Review & DB Page verification
   assert(reviewCode.includes("ApprovalModal") || reviewCode.includes("approvalModalReg"), "CoordinatorReview includes approval confirmation modal");
   assert(reviewCode.includes("courses_available"), "CoordinatorReview displays submitted courses");
@@ -101,6 +105,18 @@ async function runTests() {
   assert(
     mergeCourses("Engineering", "engineering, MBA") === "Engineering; MBA",
     "mergeCourses: case-insensitive deduplication"
+  );
+  assert(
+    mergeCourses("School of Law; MBA", null) === "School of Law; MBA",
+    "mergeCourses: preserves existing courses when incoming courses is null"
+  );
+  assert(
+    mergeCourses("School of Law; MBA", "") === "School of Law; MBA",
+    "mergeCourses: preserves existing courses when incoming courses is empty string"
+  );
+  assert(
+    mergeCourses("School of Law; MBA", "   ") === "School of Law; MBA",
+    "mergeCourses: preserves existing courses when incoming courses is whitespace only"
   );
 
   // ---------------------------------------------------------------------------
@@ -184,7 +200,7 @@ async function runTests() {
         category: "MBA/Management",
         website: "https://www.test-sharda.edu.in",
         remarks: `[Courses: ${incomingCoursesA}]`,
-        matched_college_id: existingCollege.id, // Populated via selected_college_id in registration endpoint
+        matched_college_id: existingCollege.id,
         status: "pending",
       },
     ])
@@ -288,9 +304,67 @@ async function runTests() {
   assert(duplicateCoordCheck.length === 1, "Duplicate Prevention: Exactly one placement coordinator row exists for this email");
 
   // ---------------------------------------------------------------------------
-  // Suite 6: Case B — "College Not Found? Add Your Institution" New College Flow
+  // Suite 6: Optional Courses Test — Submission & Approval with NO Courses Selected
   // ---------------------------------------------------------------------------
-  console.log("\nSuite 6: Case B — 'College Not Found? Add Your Institution' New College Flow");
+  console.log("\nSuite 6: Optional Courses Test — Submission & Approval with NO Courses");
+
+  const testEmailOptA = `test.coord.opt.a.${Date.now()}@saarthitest.edu.in`;
+
+  // 1. Submit registration with NO courses (courses_available is null)
+  const { data: regOptA, error: regOptAErr } = await sb
+    .from("coordinator_registrations")
+    .insert([
+      {
+        full_name: "Prof. Optional Courses Tester",
+        designation: "Assistant Director",
+        college_name: existingCollege.name,
+        official_email: testEmailOptA,
+        phone: "9876543219",
+        city: existingCollege.city || "Greater Noida",
+        state: existingCollege.state || "Uttar Pradesh",
+        category: "MBA/Management",
+        matched_college_id: existingCollege.id,
+        courses_available: null, // No courses submitted
+        status: "pending",
+      },
+    ])
+    .select()
+    .single();
+
+  assert(!regOptAErr && regOptA, "Optional Courses: Backend successfully created registration with NO courses (null)");
+  assert(regOptA.courses_available === null, "Optional Courses: Saved courses_available accurately as null");
+
+  // 2. Approve and verify existing college courses are completely preserved (not overwritten with null/empty)
+  const preApprovalCourses = checkColA.courses_available;
+  const mergedNoCourses = mergeCourses(preApprovalCourses, regOptA.courses_available);
+  assert(
+    mergedNoCourses === preApprovalCourses,
+    "Optional Courses: On approval with no courses, existing college courses are preserved without being overwritten"
+  );
+
+  // Link coordinator
+  const { data: coordOptA } = await sb
+    .from("placement_coordinators")
+    .insert([
+      {
+        college_id: targetColIdA,
+        name: regOptA.full_name.trim(),
+        phone: regOptA.phone,
+        email: regOptA.official_email,
+        is_current: true,
+        effective_from: new Date().toISOString().split("T")[0],
+        created_by_name: "Integration Test Admin",
+      },
+    ])
+    .select()
+    .single();
+
+  assert(coordOptA && coordOptA.college_id === targetColIdA, "Optional Courses: Coordinator successfully linked to college without courses");
+
+  // ---------------------------------------------------------------------------
+  // Suite 7: Case B — 'College Not Found? Add Your Institution' New College Flow
+  // ---------------------------------------------------------------------------
+  console.log("\nSuite 7: Case B — 'College Not Found? Add Your Institution' New College Flow");
 
   const newCollegeName = `Apex Institute of Frontier Tech ${Date.now()}`;
   const testEmailB = `test.coord.b.${Date.now()}@saarthitest.edu.in`;
@@ -388,9 +462,9 @@ async function runTests() {
   assert(countAfterB === initialCollegeCount + 1, `Case B: Directory count increased by exactly 1 (${countAfterB} === ${initialCollegeCount} + 1)`);
 
   // ---------------------------------------------------------------------------
-  // Suite 7: Case C — Reject Coordinator Request
+  // Suite 8: Case C — Reject Coordinator Request
   // ---------------------------------------------------------------------------
-  console.log("\nSuite 7: Case C — Rejecting Coordinator Request");
+  console.log("\nSuite 8: Case C — Rejecting Coordinator Request");
 
   const testEmailC = `test.coord.c.${Date.now()}@saarthitest.edu.in`;
   const { data: regC } = await sb
@@ -436,14 +510,18 @@ async function runTests() {
   assert(!unverifiedCoordCheck || unverifiedCoordCheck.length === 0, "Case C: Rejection did not create any placement coordinator link");
 
   // ---------------------------------------------------------------------------
-  // Suite 8: Teardown & Baseline Data Restoration
+  // Suite 9: Teardown & Baseline Data Restoration
   // ---------------------------------------------------------------------------
-  console.log("\nSuite 8: Teardown & Baseline Data Preservation");
+  console.log("\nSuite 9: Teardown & Baseline Data Preservation");
 
   // Clean up Case A
   await sb.from("placement_coordinators").delete().eq("id", coordA.id);
   await sb.from("coordinator_registrations").delete().eq("id", regA.id);
   await sb.from("colleges").update({ tpo: existingCollege.tpo, courses_available: originalCollegeCourses }).eq("id", targetColIdA);
+
+  // Clean up Optional Courses Test
+  await sb.from("placement_coordinators").delete().eq("id", coordOptA.id);
+  await sb.from("coordinator_registrations").delete().eq("id", regOptA.id);
 
   // Clean up Case B
   await sb.from("placement_coordinators").delete().eq("id", coordB.id);

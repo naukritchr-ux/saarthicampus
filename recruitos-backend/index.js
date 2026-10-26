@@ -2444,9 +2444,7 @@ app.post("/api/placement-coordinator/register", async (req, res) => {
       matched_college_id: verifiedCollegeId,
       status: "pending",
     };
-    if (cleanCourses) {
-      payload.courses_available = cleanCourses;
-    }
+    payload.courses_available = cleanCourses || null;
 
     let { data, error } = await supabase
       .from("coordinator_registrations")
