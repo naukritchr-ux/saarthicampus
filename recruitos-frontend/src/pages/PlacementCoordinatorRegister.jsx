@@ -62,34 +62,48 @@ export default function PlacementCoordinatorRegister() {
   const [collegeSearch, setCollegeSearch] = useState("");
   const [collegeResults, setCollegeResults] = useState([]);
   const [searchingColleges, setSearchingColleges] = useState(false);
+  const [searchPerformed, setSearchPerformed] = useState(false);
+  const [searchError, setSearchError] = useState(null);
   const [selectedCollege, setSelectedCollege] = useState(null);
   const [isAddingNewCollege, setIsAddingNewCollege] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape key
   useEffect(() => {
     function handleClickOutside(e) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setShowDropdown(false);
       }
     }
+    function handleKeyDown(e) {
+      if (e.key === "Escape") {
+        setShowDropdown(false);
+      }
+    }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 
-  // Debounced search for colleges
+  // Debounced search for colleges (Requires at least 2 characters)
   useEffect(() => {
     let cancel = false;
     const term = collegeSearch.trim();
 
-    if (!term) {
+    if (term.length < 2) {
       setCollegeResults([]);
       setSearchingColleges(false);
+      setSearchPerformed(false);
+      setSearchError(null);
       return;
     }
 
     setSearchingColleges(true);
+    setSearchError(null);
     const timer = setTimeout(async () => {
       try {
         const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
@@ -97,26 +111,45 @@ export default function PlacementCoordinatorRegister() {
         if (!cancel && res.ok) {
           const data = await res.json();
           setCollegeResults(Array.isArray(data) ? data : []);
+          setSearchPerformed(true);
         } else if (!cancel) {
           // Client fallback to Supabase query
-          const { data } = await supabase
+          const { data, error } = await supabase
             .from("colleges")
             .select("id, name, city, state, course, website")
             .or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%`)
             .limit(20);
-          if (!cancel && data) setCollegeResults(data);
+          if (!cancel) {
+            if (error) {
+              setSearchError(error.message);
+            } else {
+              setCollegeResults(data || []);
+            }
+            setSearchPerformed(true);
+          }
         }
       } catch {
         if (!cancel) {
           try {
-            const { data } = await supabase
+            const { data, error } = await supabase
               .from("colleges")
               .select("id, name, city, state, course, website")
               .or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%`)
               .limit(20);
-            if (!cancel && data) setCollegeResults(data);
+            if (!cancel) {
+              if (error) {
+                setSearchError(error.message);
+              } else {
+                setCollegeResults(data || []);
+              }
+              setSearchPerformed(true);
+            }
           } catch {
-            setCollegeResults([]);
+            if (!cancel) {
+              setCollegeResults([]);
+              setSearchError("Unable to search colleges. You can add your institution manually.");
+              setSearchPerformed(true);
+            }
           }
         }
       } finally {
@@ -135,6 +168,9 @@ export default function PlacementCoordinatorRegister() {
     setIsAddingNewCollege(false);
     setShowDropdown(false);
     setCollegeSearch("");
+    setCollegeResults([]);
+    setSearchPerformed(false);
+    setSearchError(null);
     setForm((prev) => ({
       ...prev,
       college_name: college.name,
@@ -159,6 +195,10 @@ export default function PlacementCoordinatorRegister() {
     setSelectedCollege(null);
     setIsAddingNewCollege(false);
     setCollegeSearch("");
+    setCollegeResults([]);
+    setSearchPerformed(false);
+    setSearchError(null);
+    setShowDropdown(false);
     setForm((prev) => ({
       ...prev,
       college_name: "",
@@ -673,12 +713,16 @@ export default function PlacementCoordinatorRegister() {
                       setCollegeSearch(e.target.value);
                       setShowDropdown(true);
                     }}
-                    onFocus={() => setShowDropdown(true)}
-                    placeholder="Search existing college directory or type name…"
+                    onFocus={() => {
+                      if (collegeSearch.trim().length >= 2) {
+                        setShowDropdown(true);
+                      }
+                    }}
+                    placeholder="Search existing college directory by name, city..."
                     style={{
                       width: "100%",
                       padding: "10px 12px",
-                      paddingRight: searchingColleges ? 90 : 12,
+                      paddingRight: searchingColleges ? 90 : (collegeSearch ? 36 : 12),
                       borderRadius: 8,
                       border: "1px solid #cbd5e1",
                       fontSize: 13.5,
@@ -700,10 +744,66 @@ export default function PlacementCoordinatorRegister() {
                       Searching…
                     </span>
                   )}
+                  {!searchingColleges && collegeSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCollegeSearch("");
+                        setShowDropdown(false);
+                        setCollegeResults([]);
+                        setSearchPerformed(false);
+                      }}
+                      style={{
+                        position: "absolute",
+                        right: 10,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "none",
+                        border: "none",
+                        fontSize: 13,
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        padding: 4,
+                      }}
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
-                {/* Dropdown Menu */}
-                {showDropdown && (
+                {/* Direct action helper row below input (accessible without popup covering fields) */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: "#64748b",
+                  }}
+                >
+                  <span>Type at least 2 characters to search</span>
+                  <button
+                    type="button"
+                    onClick={handleStartAddNewCollege}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#6327BD",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      fontSize: 12,
+                      padding: 0,
+                    }}
+                  >
+                    College not found? Add your institution
+                  </button>
+                </div>
+
+                {/* Dropdown Menu - only displayed after user enters >= 2 chars */}
+                {showDropdown && collegeSearch.trim().length >= 2 && (
                   <div
                     style={{
                       position: "absolute",
@@ -713,66 +813,165 @@ export default function PlacementCoordinatorRegister() {
                       background: "#ffffff",
                       borderRadius: 10,
                       border: "1px solid #cbd5e1",
-                      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15)",
+                      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
                       zIndex: 100,
-                      maxHeight: 280,
+                      maxHeight: 260,
                       overflowY: "auto",
                     }}
                   >
-                    {/* Matching Colleges List */}
-                    {collegeResults.map((c) => (
+                    {/* 1. Loading State */}
+                    {searchingColleges && (
                       <div
-                        key={c.id}
-                        onClick={() => handleSelectCollege(c)}
                         style={{
-                          padding: "10px 14px",
-                          borderBottom: "1px solid #f1f5f9",
-                          cursor: "pointer",
-                          transition: "background 0.15s",
+                          padding: "14px 16px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          color: "#6327BD",
+                          fontSize: 13,
+                          fontWeight: 600,
                         }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
                       >
-                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>
-                          {c.name}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                          📍 {[c.city, c.state].filter(Boolean).join(", ") || "Location on record"}
-                        </div>
-                      </div>
-                    ))}
-
-                    {!searchingColleges && collegeResults.length === 0 && collegeSearch.trim() && (
-                      <div style={{ padding: "12px 14px", fontSize: 13, color: "#64748b", textAlign: "center" }}>
-                        No colleges found matching "{collegeSearch}"
+                        <span style={{ fontSize: 14 }}>⏳</span>
+                        Searching directory for "{collegeSearch.trim()}"…
                       </div>
                     )}
 
-                    {/* Add New Institution Option */}
-                    <div
-                      onClick={handleStartAddNewCollege}
-                      style={{
-                        padding: "12px 14px",
-                        background: "#faf5ff",
-                        borderTop: "1.5px solid #e9d5ff",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f3e8ff")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "#faf5ff")}
-                    >
-                      <span style={{ fontSize: 16 }}>➕</span>
+                    {/* 2. Error State */}
+                    {!searchingColleges && searchError && (
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#6327BD" }}>
-                          College not found? Add your institution
+                        <div style={{ padding: "12px 14px", fontSize: 13, color: "#b91c1c", background: "#fef2f2" }}>
+                          ⚠️ {searchError}
                         </div>
-                        <div style={{ fontSize: 11.5, color: "#7c3aed" }}>
-                          Enter details to submit your institution for review
+                        <div
+                          onClick={handleStartAddNewCollege}
+                          style={{
+                            padding: "12px 14px",
+                            background: "#faf5ff",
+                            borderTop: "1px solid #f3e8ff",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <span style={{ fontSize: 16 }}>➕</span>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#6327BD" }}>
+                              College not found? Add your institution
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "#7c3aed" }}>
+                              Enter institution details manually
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* 3. Matching Colleges Found */}
+                    {!searchingColleges && !searchError && searchPerformed && collegeResults.length > 0 && (
+                      <>
+                        <div
+                          style={{
+                            padding: "8px 14px",
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            color: "#64748b",
+                            background: "#f8fafc",
+                            borderBottom: "1px solid #f1f5f9",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          Matching Colleges ({collegeResults.length})
+                        </div>
+                        {collegeResults.map((c) => (
+                          <div
+                            key={c.id}
+                            onClick={() => handleSelectCollege(c)}
+                            style={{
+                              padding: "10px 14px",
+                              borderBottom: "1px solid #f1f5f9",
+                              cursor: "pointer",
+                              transition: "background 0.15s",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
+                          >
+                            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>
+                              {c.name}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                              📍 {[c.city, c.state].filter(Boolean).join(", ") || "Location on record"}
+                            </div>
+                          </div>
+                        ))}
+
+                        <div
+                          onClick={handleStartAddNewCollege}
+                          style={{
+                            padding: "11px 14px",
+                            background: "#faf5ff",
+                            borderTop: "1.5px solid #f1f5f9",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "#f3e8ff")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "#faf5ff")}
+                        >
+                          <span style={{ fontSize: 15 }}>➕</span>
+                          <div>
+                            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6327BD" }}>
+                              College not found? Add your institution
+                            </div>
+                            <div style={{ fontSize: 11, color: "#7c3aed" }}>
+                              Not in this list? Enter details manually
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* 4. No Matches Found (only after search finished) */}
+                    {!searchingColleges && !searchError && searchPerformed && collegeResults.length === 0 && (
+                      <>
+                        <div style={{ padding: "14px 16px", textAlign: "center", background: "#f8fafc" }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#334155", marginBottom: 2 }}>
+                            No matching colleges found
+                          </div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            No institutions found matching "{collegeSearch.trim()}"
+                          </div>
+                        </div>
+
+                        <div
+                          onClick={handleStartAddNewCollege}
+                          style={{
+                            padding: "12px 16px",
+                            background: "#faf5ff",
+                            borderTop: "1.5px solid #e9d5ff",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "#f3e8ff")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "#faf5ff")}
+                        >
+                          <span style={{ fontSize: 16 }}>➕</span>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#6327BD" }}>
+                              College not found? Add your institution
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "#7c3aed" }}>
+                              Enter details to submit your institution for review
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
