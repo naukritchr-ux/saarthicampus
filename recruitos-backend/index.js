@@ -2306,6 +2306,29 @@ function checkCoordinatorRateLimit(ip) {
   return true;
 }
 
+// 0. Public endpoint to search existing colleges for registration form dropdown
+app.get("/api/colleges/public-search", async (req, res) => {
+  try {
+    const { q } = req.query;
+    let query = supabase
+      .from("colleges")
+      .select("id, name, city, state, course, website")
+      .order("name", { ascending: true })
+      .limit(30);
+
+    if (q && q.trim()) {
+      const term = q.trim();
+      query = query.or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 1. Public Placement Coordinator Registration Endpoint
 app.post("/api/placement-coordinator/register", async (req, res) => {
   try {
@@ -2327,6 +2350,8 @@ app.post("/api/placement-coordinator/register", async (req, res) => {
       category,
       website,
       remarks,
+      courses_available,
+      selected_college_id,
     } = req.body;
 
     // Required field validation
@@ -2380,6 +2405,31 @@ app.post("/api/placement-coordinator/register", async (req, res) => {
       });
     }
 
+    // Verify selected_college_id if provided
+    let verifiedCollegeId = null;
+    if (selected_college_id) {
+      const { data: colRow } = await supabase
+        .from("colleges")
+        .select("id")
+        .eq("id", selected_college_id)
+        .maybeSingle();
+      if (colRow) {
+        verifiedCollegeId = colRow.id;
+      }
+    }
+
+    let cleanCourses = "";
+    if (Array.isArray(courses_available)) {
+      cleanCourses = courses_available.filter(Boolean).join(", ");
+    } else if (typeof courses_available === "string") {
+      cleanCourses = courses_available.trim();
+    }
+
+    let remarksWithCourses = remarks && typeof remarks === "string" && remarks.trim() ? remarks.trim().slice(0, 1000) : "";
+    if (cleanCourses && !remarksWithCourses.includes("[Courses:")) {
+      remarksWithCourses = remarksWithCourses ? `${remarksWithCourses}\n[Courses: ${cleanCourses}]` : `[Courses: ${cleanCourses}]`;
+    }
+
     const payload = {
       full_name: full_name.trim(),
       designation: designation.trim(),
@@ -2390,15 +2440,30 @@ app.post("/api/placement-coordinator/register", async (req, res) => {
       state: state.trim(),
       category: category.trim(),
       website: website && typeof website === "string" && website.trim() ? website.trim() : null,
-      remarks: remarks && typeof remarks === "string" && remarks.trim() ? remarks.trim().slice(0, 1000) : null,
+      remarks: remarksWithCourses || null,
+      matched_college_id: verifiedCollegeId,
       status: "pending",
     };
+    if (cleanCourses) {
+      payload.courses_available = cleanCourses;
+    }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("coordinator_registrations")
       .insert([payload])
       .select()
       .single();
+
+    if (error && error.message && error.message.includes("courses_available")) {
+      delete payload.courses_available;
+      const retry = await supabase
+        .from("coordinator_registrations")
+        .insert([payload])
+        .select()
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.error("Coordinator registration insert error:", error);
@@ -2446,7 +2511,16 @@ app.get("/api/placement-coordinators/registrations", requireStaff, async (req, r
     const enriched = (registrations || []).map((r) => {
       let matchedCollege = r.colleges || null;
       let potentialMatches = [];
-      if (!matchedCollege && allColleges) {
+      if (r.colleges) {
+        // Coordinator selected this existing college during registration
+        matchedCollege = {
+          ...r.colleges,
+          score: 100,
+          match_type: "Coordinator Selected",
+          match_reason: "Selected by coordinator during registration",
+        };
+        potentialMatches = [matchedCollege];
+      } else if (allColleges) {
         const matchResult = findCollegeMatches(r.college_name, r.city, r.state, allColleges);
         matchedCollege = matchResult.suggested_college;
         potentialMatches = matchResult.potential_matches;
@@ -2521,7 +2595,7 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
     }
 
     // 3. Backend fallback sequence
-    let finalCollegeId = target_college_id || null;
+    let finalCollegeId = target_college_id || (!create_new ? reg.matched_college_id : null) || null;
     let isNewCollege = false;
 
     // If admin explicitly requested create_new or no target specified:

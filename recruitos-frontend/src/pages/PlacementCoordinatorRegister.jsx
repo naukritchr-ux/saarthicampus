@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import SaarthiLogo from "../components/SaarthiLogo";
 import { sanitizePhone } from "../lib/phone";
 import { isValidEmail } from "../lib/email";
-
+import { supabase } from "../lib/supabaseClient";
 
 const COURSE_OPTIONS = [
   "MBA",
@@ -58,6 +58,113 @@ export default function PlacementCoordinatorRegister() {
   const [submittedData, setSubmittedData] = useState(null);
   const [copied, setCopied] = useState(false);
 
+  // College search & selection state
+  const [collegeSearch, setCollegeSearch] = useState("");
+  const [collegeResults, setCollegeResults] = useState([]);
+  const [searchingColleges, setSearchingColleges] = useState(false);
+  const [selectedCollege, setSelectedCollege] = useState(null);
+  const [isAddingNewCollege, setIsAddingNewCollege] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Debounced search for colleges
+  useEffect(() => {
+    let cancel = false;
+    const term = collegeSearch.trim();
+
+    if (!term) {
+      setCollegeResults([]);
+      setSearchingColleges(false);
+      return;
+    }
+
+    setSearchingColleges(true);
+    const timer = setTimeout(async () => {
+      try {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+        const res = await fetch(`${backendUrl}/api/colleges/public-search?q=${encodeURIComponent(term)}`);
+        if (!cancel && res.ok) {
+          const data = await res.json();
+          setCollegeResults(Array.isArray(data) ? data : []);
+        } else if (!cancel) {
+          // Client fallback to Supabase query
+          const { data } = await supabase
+            .from("colleges")
+            .select("id, name, city, state, course, website")
+            .or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%`)
+            .limit(20);
+          if (!cancel && data) setCollegeResults(data);
+        }
+      } catch {
+        if (!cancel) {
+          try {
+            const { data } = await supabase
+              .from("colleges")
+              .select("id, name, city, state, course, website")
+              .or(`name.ilike.%${term}%,city.ilike.%${term}%,state.ilike.%${term}%`)
+              .limit(20);
+            if (!cancel && data) setCollegeResults(data);
+          } catch {
+            setCollegeResults([]);
+          }
+        }
+      } finally {
+        if (!cancel) setSearchingColleges(false);
+      }
+    }, 250);
+
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [collegeSearch]);
+
+  function handleSelectCollege(college) {
+    setSelectedCollege(college);
+    setIsAddingNewCollege(false);
+    setShowDropdown(false);
+    setCollegeSearch("");
+    setForm((prev) => ({
+      ...prev,
+      college_name: college.name,
+      city: college.city || prev.city || "",
+      state: college.state || prev.state || "",
+      website: college.website || prev.website || "",
+      category: college.course || prev.category,
+    }));
+  }
+
+  function handleStartAddNewCollege() {
+    setIsAddingNewCollege(true);
+    setSelectedCollege(null);
+    setShowDropdown(false);
+    setForm((prev) => ({
+      ...prev,
+      college_name: collegeSearch.trim() || prev.college_name,
+    }));
+  }
+
+  function handleClearSelectedCollege() {
+    setSelectedCollege(null);
+    setIsAddingNewCollege(false);
+    setCollegeSearch("");
+    setForm((prev) => ({
+      ...prev,
+      college_name: "",
+    }));
+  }
+
   function handlePhoneChange(e) {
     setForm({ ...form, phone: sanitizePhone(e.target.value) });
   }
@@ -90,7 +197,7 @@ export default function PlacementCoordinatorRegister() {
       return;
     }
     if (!form.college_name.trim()) {
-      setError("Please enter your College Name.");
+      setError("Please search and select your College, or choose 'Add your institution'.");
       return;
     }
     if (!isValidEmail(form.official_email)) {
@@ -102,11 +209,11 @@ export default function PlacementCoordinatorRegister() {
       return;
     }
     if (!form.city.trim()) {
-      setError("Please enter your City.");
+      setError("Please enter your institution's City.");
       return;
     }
     if (!form.state.trim()) {
-      setError("Please select your State.");
+      setError("Please select your institution's State.");
       return;
     }
     if (!form.category.trim()) {
@@ -128,12 +235,18 @@ export default function PlacementCoordinatorRegister() {
 
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+      const payload = {
+        ...form,
+        selected_college_id: selectedCollege ? selectedCollege.id : null,
+        courses_available: coursesAvailableStr,
+      };
+
       const res = await fetch(`${backendUrl}/api/placement-coordinator/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ ...form, courses_available: coursesAvailableStr }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -146,6 +259,7 @@ export default function PlacementCoordinatorRegister() {
         college: form.college_name,
         email: form.official_email,
         courses: coursesAvailableStr,
+        isExisting: Boolean(selectedCollege),
       });
       setSubmitted(true);
     } catch (err) {
@@ -170,7 +284,7 @@ export default function PlacementCoordinatorRegister() {
     borderRadius: 16,
     padding: "36px 32px",
     width: "100%",
-    maxWidth: 620,
+    maxWidth: 640,
     border: "1px solid #e2e8f0",
     boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04)",
   };
@@ -186,7 +300,7 @@ export default function PlacementCoordinatorRegister() {
               height: 64,
               borderRadius: "50%",
               background: "#dcfce7",
-              color: "#16a34a",
+              color: "#166534",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -222,7 +336,14 @@ export default function PlacementCoordinatorRegister() {
             {submittedData?.courses && (
               <div>• Courses Offered: <strong>{submittedData.courses}</strong></div>
             )}
-            <div>• Our campus relations team will verify your institution and connect with you.</div>
+            <div>
+              • Institution: <strong>{submittedData?.college}</strong>{" "}
+              {submittedData?.isExisting ? (
+                <span style={{ color: "#16a34a", fontWeight: 700 }}>(Linked to Existing College)</span>
+              ) : (
+                <span style={{ color: "#2563eb", fontWeight: 700 }}>(New Institution Record Pending Verification)</span>
+              )}
+            </div>
             <div>• Status: <span style={{ color: "#d97706", fontWeight: 700 }}>Pending Admin Review</span></div>
           </div>
 
@@ -232,6 +353,9 @@ export default function PlacementCoordinatorRegister() {
                 setForm(emptyForm);
                 setSelectedCourses([]);
                 setOtherCourseText("");
+                setSelectedCollege(null);
+                setIsAddingNewCollege(false);
+                setCollegeSearch("");
                 setSubmitted(false);
               }}
               style={{
@@ -289,32 +413,33 @@ export default function PlacementCoordinatorRegister() {
           <button
             type="button"
             onClick={copyShareLink}
-            title="Copy public link to share with other coordinators"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 12,
+              fontSize: 11.5,
               fontWeight: 600,
-              padding: "6px 12px",
-              borderRadius: 20,
+              padding: "5px 10px",
+              borderRadius: 6,
               border: "1px solid #c7d2fe",
               background: copied ? "#dcfce7" : "#eef2ff",
               color: copied ? "#16a34a" : "#4338ca",
               cursor: "pointer",
-              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
             }}
           >
-            {copied ? "✓ Copied Link" : "🔗 Copy Form Link"}
+            {copied ? "✓ Link Copied" : "🔗 Share Link"}
           </button>
         </div>
 
-        <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: "0 0 6px" }}>
-          Placement Coordinator Registration
-        </h1>
-        <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 24px", lineHeight: 1.5 }}>
-          Register your college Training & Placement Cell to connect your graduating students with corporate recruiters, schedule campus drives, and manage placements.
-        </p>
+        {/* Title */}
+        <div style={{ marginBottom: 24 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: "0 0 6px" }}>
+            Placement Coordinator Onboarding
+          </h1>
+          <p style={{ fontSize: 13.5, color: "#64748b", margin: 0, lineHeight: 1.5 }}>
+            Register your institution's placement cell with Saarthi Campus to unlock AI-driven campus recruitment drives.
+          </p>
+        </div>
 
         {error && (
           <div
@@ -378,26 +503,280 @@ export default function PlacementCoordinatorRegister() {
             </div>
           </div>
 
-          {/* College Name */}
+          {/* College Name Selection & Search */}
           <div>
             <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
               College / University Name *
             </label>
-            <input
-              type="text"
-              value={form.college_name}
-              onChange={(e) => setForm({ ...form, college_name: e.target.value })}
-              placeholder="e.g. Indian Institute of Management / Technology"
-              required
-              style={{
-                width: "100%",
-                padding: "9px 12px",
-                borderRadius: 8,
-                border: "1px solid #cbd5e1",
-                fontSize: 13.5,
-                boxSizing: "border-box",
-              }}
-            />
+
+            {selectedCollege ? (
+              /* State A: Existing College Selected */
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  background: "#f0fdf4",
+                  border: "1.5px solid #86efac",
+                  borderRadius: 10,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    ✓ Linked Existing Institution
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a", marginTop: 2 }}>
+                    {selectedCollege.name}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "#475569", marginTop: 2 }}>
+                    📍 {[selectedCollege.city, selectedCollege.state].filter(Boolean).join(", ") || "Location on record"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearSelectedCollege}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 6,
+                    padding: "6px 12px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#475569",
+                    cursor: "pointer",
+                  }}
+                >
+                  Change
+                </button>
+              </div>
+            ) : isAddingNewCollege ? (
+              /* State B: Adding New Institution */
+              <div
+                style={{
+                  padding: "16px",
+                  background: "#f8fafc",
+                  border: "1.5px dashed #cbd5e1",
+                  borderRadius: 12,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>
+                      Enter Institution Details
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>
+                      Please provide your institution's name and location for verification and directory onboarding.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingNewCollege(false);
+                      setCollegeSearch("");
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#6327BD",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    ← Search Directory
+                  </button>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                    College / University Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={form.college_name}
+                    onChange={(e) => setForm({ ...form, college_name: e.target.value })}
+                    placeholder="e.g. Apex Institute of Management & Technology"
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      fontSize: 13.5,
+                      boxSizing: "border-box",
+                      background: "#ffffff",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                      City *
+                    </label>
+                    <input
+                      type="text"
+                      value={form.city}
+                      onChange={(e) => setForm({ ...form, city: e.target.value })}
+                      placeholder="e.g. Mumbai, Pune, Lucknow"
+                      required
+                      style={{
+                        width: "100%",
+                        padding: "9px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        fontSize: 13.5,
+                        boxSizing: "border-box",
+                        background: "#ffffff",
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                      State *
+                    </label>
+                    <select
+                      value={form.state}
+                      onChange={(e) => setForm({ ...form, state: e.target.value })}
+                      required
+                      style={{
+                        width: "100%",
+                        padding: "9px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                        fontSize: 13.5,
+                        background: "#fff",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <option value="">-- Select State --</option>
+                      {STATES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* State C: Search Input with Dropdown */
+              <div style={{ position: "relative" }} ref={dropdownRef}>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    value={collegeSearch}
+                    onChange={(e) => {
+                      setCollegeSearch(e.target.value);
+                      setShowDropdown(true);
+                    }}
+                    onFocus={() => setShowDropdown(true)}
+                    placeholder="Search existing college directory or type name…"
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      paddingRight: searchingColleges ? 90 : 12,
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      fontSize: 13.5,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  {searchingColleges && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        right: 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        fontSize: 12,
+                        color: "#6327BD",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Searching…
+                    </span>
+                  )}
+                </div>
+
+                {/* Dropdown Menu */}
+                {showDropdown && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 4px)",
+                      left: 0,
+                      right: 0,
+                      background: "#ffffff",
+                      borderRadius: 10,
+                      border: "1px solid #cbd5e1",
+                      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15)",
+                      zIndex: 100,
+                      maxHeight: 280,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {/* Matching Colleges List */}
+                    {collegeResults.map((c) => (
+                      <div
+                        key={c.id}
+                        onClick={() => handleSelectCollege(c)}
+                        style={{
+                          padding: "10px 14px",
+                          borderBottom: "1px solid #f1f5f9",
+                          cursor: "pointer",
+                          transition: "background 0.15s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
+                      >
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>
+                          {c.name}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                          📍 {[c.city, c.state].filter(Boolean).join(", ") || "Location on record"}
+                        </div>
+                      </div>
+                    ))}
+
+                    {!searchingColleges && collegeResults.length === 0 && collegeSearch.trim() && (
+                      <div style={{ padding: "12px 14px", fontSize: 13, color: "#64748b", textAlign: "center" }}>
+                        No colleges found matching "{collegeSearch}"
+                      </div>
+                    )}
+
+                    {/* Add New Institution Option */}
+                    <div
+                      onClick={handleStartAddNewCollege}
+                      style={{
+                        padding: "12px 14px",
+                        background: "#faf5ff",
+                        borderTop: "1.5px solid #e9d5ff",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f3e8ff")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#faf5ff")}
+                    >
+                      <span style={{ fontSize: 16 }}>➕</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#6327BD" }}>
+                          College not found? Add your institution
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "#7c3aed" }}>
+                          Enter details to submit your institution for review
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Email & Phone */}
@@ -447,56 +826,58 @@ export default function PlacementCoordinatorRegister() {
             </div>
           </div>
 
-          {/* City & State */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
-                City *
-              </label>
-              <input
-                type="text"
-                value={form.city}
-                onChange={(e) => setForm({ ...form, city: e.target.value })}
-                placeholder="e.g. Mumbai, Lucknow, Bhubaneswar"
-                required
-                style={{
-                  width: "100%",
-                  padding: "9px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #cbd5e1",
-                  fontSize: 13.5,
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
+          {/* City & State (shown when an existing college is selected or before selection, but disabled if selected) */}
+          {selectedCollege && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
+                  City *
+                </label>
+                <input
+                  type="text"
+                  value={form.city}
+                  onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  placeholder="City"
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13.5,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
 
-            <div>
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
-                State *
-              </label>
-              <select
-                value={form.state}
-                onChange={(e) => setForm({ ...form, state: e.target.value })}
-                required
-                style={{
-                  width: "100%",
-                  padding: "9px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #cbd5e1",
-                  fontSize: 13.5,
-                  background: "#fff",
-                  boxSizing: "border-box",
-                }}
-              >
-                <option value="">-- Select State --</option>
-                {STATES.map((st) => (
-                  <option key={st} value={st}>
-                    {st}
-                  </option>
-                ))}
-              </select>
+              <div>
+                <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 5 }}>
+                  State *
+                </label>
+                <select
+                  value={form.state}
+                  onChange={(e) => setForm({ ...form, state: e.target.value })}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    fontSize: 13.5,
+                    background: "#fff",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <option value="">-- Select State --</option>
+                  {STATES.map((st) => (
+                    <option key={st} value={st}>
+                      {st}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Category & Website */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
@@ -547,7 +928,7 @@ export default function PlacementCoordinatorRegister() {
             </div>
           </div>
 
-                    {/* Courses Available Multi-Select */}
+          {/* Courses Available Multi-Select */}
           <div>
             <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
               Courses Available * <span style={{ fontSize: 11, fontWeight: 500, color: "#64748b" }}>(Select all degree programs offered)</span>

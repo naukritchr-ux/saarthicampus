@@ -1,6 +1,6 @@
 // =============================================================================
-// Comprehensive Test Suite: Connect Placement Coordinator Approval with Colleges Directory
-// & Courses Available Multi-Select Functionality
+// Comprehensive Test Suite: Connect Placement Coordinator Approval with Colleges Directory,
+// Courses Available Multi-Select Functionality & Searchable College Dropdown
 // File: scripts/test_coordinator_approval_integration.js
 // =============================================================================
 
@@ -59,17 +59,26 @@ async function runTests() {
   const registerCode = fs.readFileSync(registerPage, "utf8");
   const campusDbCode = fs.readFileSync(campusDbPage, "utf8");
 
+  // Backend verification
+  assert(backendCode.includes("/api/colleges/public-search"), "Backend provides public college search endpoint /api/colleges/public-search");
+  assert(backendCode.includes("selected_college_id"), "Backend registration endpoint accepts and validates selected_college_id");
   assert(backendCode.includes("findCollegeMatches"), "Backend imports and uses findCollegeMatches");
   assert(backendCode.includes("mergeCourses"), "Backend imports and uses mergeCourses");
   assert(backendCode.includes("courses_available"), "Backend handles courses_available field in registration and approval");
   assert(backendCode.includes("placement_coordinators"), "Backend links coordinator to placement_coordinators table");
   assert(backendCode.includes("placement_coordinator_history"), "Backend writes audit trail");
 
+  // Registration Page verification
+  assert(registerCode.includes("collegeSearch") && registerCode.includes("collegeResults"), "PlacementCoordinatorRegister implements searchable dropdown state");
+  assert(registerCode.includes("College not found? Add your institution"), "PlacementCoordinatorRegister contains 'College not found? Add your institution' option");
+  assert(registerCode.includes("Enter Institution Details"), "PlacementCoordinatorRegister contains 'Enter Institution Details' manual entry form");
+  assert(registerCode.includes("selected_college_id"), "PlacementCoordinatorRegister sends selected_college_id in payload");
   assert(registerCode.includes("COURSE_OPTIONS"), "PlacementCoordinatorRegister defines COURSE_OPTIONS");
   assert(registerCode.includes("MBA") && registerCode.includes("B.Tech") && registerCode.includes("Other"), "Registration includes requested course options");
   assert(registerCode.includes("toggleCourse"), "Registration has multi-select toggle function");
   assert(registerCode.includes("otherCourseText"), "Registration has Other course text input");
 
+  // Review & DB Page verification
   assert(reviewCode.includes("ApprovalModal") || reviewCode.includes("approvalModalReg"), "CoordinatorReview includes approval confirmation modal");
   assert(reviewCode.includes("courses_available"), "CoordinatorReview displays submitted courses");
   assert(reviewCode.includes("onCollegeUpdated"), "CoordinatorReview calls onCollegeUpdated callback");
@@ -95,9 +104,9 @@ async function runTests() {
   );
 
   // ---------------------------------------------------------------------------
-  // Suite 3: College Matching Engine Verification
+  // Suite 3: College Matching & Search Logic Verification
   // ---------------------------------------------------------------------------
-  console.log("\nSuite 3: College Matching Engine Verification");
+  console.log("\nSuite 3: College Matching & Search Logic Verification");
 
   const { data: initialColleges, error: colErr } = await sb
     .from("colleges")
@@ -108,6 +117,18 @@ async function runTests() {
   console.log(`  ℹ Baseline college records count: ${initialCollegeCount}`);
   assert(initialCollegeCount >= 30, `Preserved existing colleges (found ${initialCollegeCount} records, expected >= 30)`);
 
+  // Test College Search (simulating public search query)
+  const searchQueryAmity = "Amity";
+  const { data: amityResults, error: amitySearchErr } = await sb
+    .from("colleges")
+    .select("id, name, city, state, course, website")
+    .ilike("name", `%${searchQueryAmity}%`)
+    .limit(10);
+
+  assert(!amitySearchErr && amityResults && amityResults.length > 0, "Public Search: Successfully found college matching 'Amity'");
+  assert(amityResults[0].name.toLowerCase().includes("amity"), "Public Search: Result name matches search query");
+
+  // Test Matching algorithms
   const matchExact = findCollegeMatches("Sharda University", "Greater Noida", "Uttar Pradesh", initialColleges);
   assert(
     matchExact.suggested_college && matchExact.suggested_college.name === "Sharda University" && matchExact.suggested_college.score === 100,
@@ -139,15 +160,15 @@ async function runTests() {
   );
 
   // ---------------------------------------------------------------------------
-  // Suite 4: Case A — Approve Coordinator for Existing College with Course Merging
+  // Suite 4: Case A — Search & Select Existing College with Course Merging
   // ---------------------------------------------------------------------------
-  console.log("\nSuite 4: Case A — Approving Coordinator for Existing College with Course Merging");
+  console.log("\nSuite 4: Case A — Search & Select Existing College with Course Merging");
 
   const existingCollege = initialColleges.find((c) => c.name === "Sharda University") || initialColleges[0];
   const originalCollegeCourses = existingCollege.courses_available || "";
   const testEmailA = `test.coord.a.${Date.now()}@saarthitest.edu.in`;
 
-  // 1. Insert test registration with multi-selected courses
+  // 1. Insert test registration with selected_college_id and multi-selected courses
   const incomingCoursesA = "MBA, B.Tech, MCA, LLB, Other: Data Science";
   const { data: regA, error: regAErr } = await sb
     .from("coordinator_registrations")
@@ -163,13 +184,15 @@ async function runTests() {
         category: "MBA/Management",
         website: "https://www.test-sharda.edu.in",
         remarks: `[Courses: ${incomingCoursesA}]`,
+        matched_college_id: existingCollege.id, // Populated via selected_college_id in registration endpoint
         status: "pending",
       },
     ])
     .select()
     .single();
 
-  assert(!regAErr && regA && regA.status === "pending", "Case A: Successfully created pending registration with courses");
+  assert(!regAErr && regA && regA.status === "pending", "Case A: Successfully created pending registration with selected_college_id and courses");
+  assert(regA.matched_college_id === existingCollege.id, "Case A: Registration accurately preserved selected_college_id link");
 
   // 2. Perform Case A Approval with Course Merging
   const targetColIdA = existingCollege.id;
@@ -265,15 +288,15 @@ async function runTests() {
   assert(duplicateCoordCheck.length === 1, "Duplicate Prevention: Exactly one placement coordinator row exists for this email");
 
   // ---------------------------------------------------------------------------
-  // Suite 6: Case B — Approve Coordinator for New College with Courses
+  // Suite 6: Case B — "College Not Found? Add Your Institution" New College Flow
   // ---------------------------------------------------------------------------
-  console.log("\nSuite 6: Case B — Approving Coordinator for Brand New College with Courses");
+  console.log("\nSuite 6: Case B — 'College Not Found? Add Your Institution' New College Flow");
 
   const newCollegeName = `Apex Institute of Frontier Tech ${Date.now()}`;
   const testEmailB = `test.coord.b.${Date.now()}@saarthitest.edu.in`;
   const incomingCoursesB = "B.Tech, M.Tech, BCA, MCA";
 
-  // 1. Insert pending registration for new college with courses
+  // 1. Insert pending registration for new college with courses and selected_college_id = null
   const { data: regB, error: regBErr } = await sb
     .from("coordinator_registrations")
     .insert([
@@ -288,6 +311,7 @@ async function runTests() {
         category: "Engineering/Tech",
         website: "https://www.apexfrontiertechnology.edu.in",
         remarks: `[Courses: ${incomingCoursesB}]`,
+        matched_college_id: null,
         status: "pending",
       },
     ])
@@ -296,7 +320,15 @@ async function runTests() {
 
   assert(!regBErr && regB, "Case B: Successfully submitted pending registration for brand new institution with courses");
 
-  // 2. Create new college record with courses_available
+  // Verify that new college is NOT yet added to Colleges directory before approval
+  const { data: checkPendingCollege } = await sb
+    .from("colleges")
+    .select("id")
+    .eq("name", newCollegeName);
+
+  assert(!checkPendingCollege || checkPendingCollege.length === 0, "Case B: New college details remain pending and do NOT appear in colleges directory before approval");
+
+  // 2. Create new college record with courses_available upon admin approval
   const { data: createdColB, error: createColBErr } = await sb
     .from("colleges")
     .insert([
@@ -315,7 +347,7 @@ async function runTests() {
     .select()
     .single();
 
-  assert(!createColBErr && createdColB, "Case B: Created exactly one new college record in colleges directory");
+  assert(!createColBErr && createdColB, "Case B: Created exactly one new college record in colleges directory upon approval");
   assert(createdColB.courses_available === incomingCoursesB, "Case B: New college stored courses_available accurately");
 
   // 3. Insert coordinator linked to new college
@@ -396,6 +428,13 @@ async function runTests() {
   assert(rejectedRegC.status === "rejected", "Case C: Registration status changed to 'rejected'");
   assert(rejectedRegC.rejection_reason === rejectionReason, "Case C: Rejection reason accurately stored");
 
+  // Verify rejection did NOT create college or coordinator
+  const { data: unverifiedColCheck } = await sb.from("colleges").select("id").eq("name", "Unverifiable Academy");
+  assert(!unverifiedColCheck || unverifiedColCheck.length === 0, "Case C: Rejection did not create any college record");
+
+  const { data: unverifiedCoordCheck } = await sb.from("placement_coordinators").select("id").eq("email", testEmailC);
+  assert(!unverifiedCoordCheck || unverifiedCoordCheck.length === 0, "Case C: Rejection did not create any placement coordinator link");
+
   // ---------------------------------------------------------------------------
   // Suite 8: Teardown & Baseline Data Restoration
   // ---------------------------------------------------------------------------
@@ -414,7 +453,7 @@ async function runTests() {
   // Clean up Case C
   await sb.from("coordinator_registrations").delete().eq("id", regC.id);
 
-  // Verify final colleges count
+  // Verify final colleges count matches initial count
   const { count: finalCollegeCount } = await sb.from("colleges").select("id", { count: "exact", head: true });
   assert(finalCollegeCount === initialCollegeCount, `Teardown: College records safely preserved at baseline (${finalCollegeCount} === ${initialCollegeCount})`);
 
