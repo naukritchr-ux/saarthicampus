@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { getInterviews, addInterview, getAllApplications, authHeaders } from '../lib/api';
 
 export default function Interview() {

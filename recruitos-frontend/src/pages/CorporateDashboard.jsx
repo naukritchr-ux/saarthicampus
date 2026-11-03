@@ -1,5 +1,18 @@
-import { useMemo, useState, useEffect } from "react";
-import { getCorporateKpis, getCorporateCandidates } from "../lib/api";
+import { useState, useEffect, useRef, useMemo } from "react";
+import {
+  RotateCw,
+  Info,
+  Briefcase,
+  Users,
+  Calendar,
+  Award,
+  CheckCircle2,
+  ArrowRight,
+  AlertCircle,
+  ExternalLink,
+  X,
+  Search,
+} from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -8,925 +21,1099 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  PieChart,
-  Pie,
-  Cell,
+  Legend,
 } from "recharts";
-
+import { getCorporateKpis } from "../lib/api";
 import "./CorporateDashboard.css";
 
-const COLORS = [
-  "#743bf1",
-  "#d83da9",
-  "#239ddd",
-  "#079b6d",
-  "#f59e0b",
-];
-
-const rowsPerPage = 5;
-
 /* =========================================================
-   GREETING
+   GREETING HELPER (Asia/Kolkata timezone)
 ========================================================= */
-
 function getGreeting() {
-  const hour = new Date().getHours();
-
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    hour12: false,
+  });
+  const hour = parseInt(formatter.format(new Date()), 10);
   if (hour >= 5 && hour < 12) {
     return "Good morning";
   }
-
   if (hour >= 12 && hour < 17) {
     return "Good afternoon";
   }
-
   return "Good evening";
 }
 
 /* =========================================================
-   MAIN COMPONENT
+   INITIALS HELPER
 ========================================================= */
+function getInitials(name = "") {
+  if (!name) return "CO";
+  const parts = name.trim().split(/[\s._-]+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
-function CorporateDashboard({
-  data = { kpis: {}, profiles: [], experience: [], locations: [] },
-  candidates = [],
+/* =========================================================
+   SEARCHABLE CUSTOM DROPDOWN (Admin dashboard style)
+========================================================= */
+function DropdownFilter({
+  label,
+  value,
+  onChange,
+  defaultLabel,
+  options = [],
+  searchable = false,
+  getItemLabel = (item) => (typeof item === "object" ? item?.title || item?.label || item?.id : item),
+  getItemValue = (item) => (typeof item === "object" ? item?.id || item?.value : item),
 }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [kpis, setKpis] = useState(data.kpis || {});
-  const [candidateList, setCandidateList] = useState(candidates || []);
-  const [profilesData, setProfilesData] = useState(data.profiles || []);
-  const [experienceData, setExperienceData] = useState(data.experience || []);
-  const [locationsData, setLocationsData] = useState(data.locations || []);
-
-  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef(null);
 
   useEffect(() => {
-    let ignore = false;
-
-    async function loadDashboard() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [kpiRes, candRes] = await Promise.all([
-          getCorporateKpis().catch(() => ({})),
-          getCorporateCandidates().catch(() => []),
-        ]);
-        if (!ignore) {
-          setKpis(kpiRes || {});
-          setCandidateList(candRes || []);
-          setProfilesData(kpiRes?.profiles || []);
-          setExperienceData(kpiRes?.experience || []);
-          setLocationsData(kpiRes?.locationsList || kpiRes?.locations || []);
-        }
-      } catch (err) {
-        if (!ignore) setError(err.message || "Failed to load dashboard data");
-      } finally {
-        if (!ignore) setLoading(false);
+    function handleClickOutside(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setOpen(false);
       }
     }
-
-    loadDashboard();
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      ignore = true;
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
-  const [showCandidateTable, setShowCandidateTable] = useState(false);
-  const [profileChartType, setProfileChartType] = useState("profiles");
 
-  /* =======================================================
-     FILTER STATES
-  ======================================================= */
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !search.trim()) return options;
+    const q = search.trim().toLowerCase();
+    return options.filter((opt) => {
+      const lbl = getItemLabel(opt);
+      return String(lbl).toLowerCase().includes(q);
+    });
+  }, [options, search, searchable, getItemLabel]);
 
-  const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("All");
-  const [experienceFilter, setExperienceFilter] = useState("All");
-  const [locationFilter, setLocationFilter] = useState("All");
+  // Display text for the active value
+  const displayValue = useMemo(() => {
+    if (!value || value === "All" || value === "All time" || value === defaultLabel) {
+      return defaultLabel;
+    }
+    const found = options.find((opt) => getItemValue(opt) === value);
+    if (found) return getItemLabel(found);
+    return value;
+  }, [value, defaultLabel, options, getItemValue, getItemLabel]);
+
+  const isActive = value && value !== "All" && value !== "All time" && value !== defaultLabel;
+
+  return (
+    <div className="corporate-dropdown-container" ref={containerRef}>
+      <label className="corporate-filter-label">{label}</label>
+      <button
+        type="button"
+        className={`corporate-filter-btn ${isActive ? "active-filter" : ""}`}
+        onClick={() => {
+          setOpen((prev) => !prev);
+          setSearch("");
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="corporate-filter-val-text" title={displayValue}>
+          {displayValue}
+        </span>
+        <span className="corporate-caret">▾</span>
+      </button>
+
+      {open && (
+        <div className="corporate-dropdown-popover" role="listbox">
+          {searchable && (
+            <div className="corporate-popover-search-wrap">
+              <Search size={13} className="corporate-popover-search-icon" />
+              <input
+                type="text"
+                className="corporate-popover-search-input"
+                placeholder={`Search ${label.toLowerCase()}...`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+          )}
+
+          <div className="corporate-popover-scroll-list">
+            <button
+              type="button"
+              className={`corporate-popover-option ${!isActive ? "selected" : ""}`}
+              onClick={() => {
+                onChange("All");
+                setOpen(false);
+              }}
+            >
+              {defaultLabel}
+            </button>
+
+            {filteredOptions.map((opt) => {
+              const optVal = getItemValue(opt);
+              const optLabel = getItemLabel(opt);
+              const isSel = optVal === value;
+
+              return (
+                <button
+                  type="button"
+                  key={String(optVal)}
+                  className={`corporate-popover-option ${isSel ? "selected" : ""}`}
+                  onClick={() => {
+                    onChange(optVal);
+                    setOpen(false);
+                  }}
+                  title={optLabel}
+                >
+                  {optLabel}
+                </button>
+              );
+            })}
+
+            {filteredOptions.length === 0 && (
+              <div className="corporate-popover-empty">No options found</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   MAIN CORPORATE DASHBOARD COMPONENT
+========================================================= */
+export default function CorporateDashboard({ setActivePage, user }) {
+  // Loading & Refreshing States
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
+
+  // Dashboard Data State
+  const [dashboardData, setDashboardData] = useState({
+    company: { name: "", logo_url: null },
+    kpis: {
+      openJobPostings: 0,
+      applicationsReceived: 0,
+      interviewsScheduled: 0,
+      offersPending: 0,
+      joined: 0,
+      talentPoolSize: 0,
+    },
+    attention: {
+      applicationsAwaitingReview: 0,
+      interviewsNeedingFeedback: 0,
+      offersAwaitingResponse: 0,
+      joiningsToConfirm: 0,
+      attentionTotal: 0,
+    },
+    pipeline: [],
+    applicationsByJob: [],
+    zeroApplicationsCount: 0,
+    recommendedCandidates: [],
+    availableJobProfiles: [],
+    availableStages: [],
+  });
+
+  // Filter States
+  const [jobFilter, setJobFilter] = useState("All");
   const [stageFilter, setStageFilter] = useState("All");
-  const [matchFilter, setMatchFilter] = useState("All");
-  const [tablePage, setTablePage] = useState(1);
+  const [dateRangeFilter, setDateRangeFilter] = useState("All time");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
 
-  function updateTableFilter(setter, value) {
-    setTablePage(1);
-    setter(value);
+  // Candidate detail modal
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+
+  // Stale request tracking
+  const activeRequestIdRef = useRef(0);
+  const isFetchingRef = useRef(false);
+
+  // Fetch Dashboard Data
+  async function loadDashboardData(isRefresh = false) {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    const requestId = ++activeRequestIdRef.current;
+    if (isRefresh) {
+      setRefreshing(true);
+      setRefreshError("");
+    } else {
+      setLoading(true);
+      setError("");
+    }
+
+    try {
+      const filters = {
+        job_id: jobFilter !== "All" ? jobFilter : undefined,
+        stage: stageFilter !== "All" ? stageFilter : undefined,
+        date_range: dateRangeFilter !== "All time" ? dateRangeFilter : undefined,
+        start_date: dateRangeFilter === "Custom range" && customStart ? customStart : undefined,
+        end_date: dateRangeFilter === "Custom range" && customEnd ? customEnd : undefined,
+      };
+
+      const res = await getCorporateKpis(filters);
+
+      if (activeRequestIdRef.current === requestId) {
+        setDashboardData((prev) => ({
+          ...prev,
+          ...res,
+          company: res.company || prev.company,
+          kpis: res.kpis || prev.kpis,
+          attention: res.attention || prev.attention,
+          pipeline: res.pipeline || [],
+          applicationsByJob: res.applicationsByJob || [],
+          zeroApplicationsCount: res.zeroApplicationsCount ?? 0,
+          recommendedCandidates: res.recommendedCandidates || [],
+          availableJobProfiles: res.availableJobProfiles || prev.availableJobProfiles || [],
+          availableStages: res.availableStages || prev.availableStages || [],
+        }));
+        setError("");
+        setRefreshError("");
+      }
+    } catch (err) {
+      if (activeRequestIdRef.current === requestId) {
+        if (isRefresh) {
+          setRefreshError("Could not refresh data. Retaining existing values.");
+        } else {
+          setError(err.message || "Failed to load corporate dashboard data.");
+        }
+      }
+    } finally {
+      if (activeRequestIdRef.current === requestId) {
+        setRefreshing(false);
+        setLoading(false);
+        isFetchingRef.current = false;
+      }
+    }
   }
 
-  /* =======================================================
-     DYNAMIC JOB PROFILE OPTIONS
-  ======================================================= */
+  // Load on filter change
+  useEffect(() => {
+    loadDashboardData(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobFilter, stageFilter, dateRangeFilter, customStart, customEnd]);
 
-  const jobProfiles = useMemo(() => {
-    const profiles = candidateList.map((candidate) => candidate.role)
-      .filter(Boolean);
-
-    return ["All", ...Array.from(new Set(profiles)).sort()];
-  }, [candidateList]);
-
-  /* =======================================================
-     DYNAMIC EXPERIENCE OPTIONS
-  ======================================================= */
-
-  const experienceOptions = useMemo(() => {
-    const values = candidateList.map((candidate) => candidate.experienceYears)
-      .filter((value) => value !== undefined && value !== null);
-
-    return ["All", ...Array.from(new Set(values)).sort((a, b) => a - b)];
-  }, [candidateList]);
-
-  /* =======================================================
-     DYNAMIC LOCATION OPTIONS
-  ======================================================= */
-
-  const locationOptions = useMemo(() => {
-    const values = candidateList.map((candidate) => candidate.location)
-      .filter(Boolean);
-
-    return ["All", ...Array.from(new Set(values)).sort()];
-  }, [candidateList]);
-
-  /* =======================================================
-     DYNAMIC STAGE OPTIONS
-  ======================================================= */
-
-  const stageOptions = useMemo(() => {
-    const values = candidateList.map((candidate) => candidate.stage)
-      .filter(Boolean);
-
-    return ["All", ...Array.from(new Set(values))];
-  }, [candidateList]);
-
-  /* =======================================================
-     GREETING
-  ======================================================= */
-
-  const greeting = getGreeting();
-
-  /* =======================================================
-     FILTER CANDIDATES
-  ======================================================= */
-
-  const filteredCandidates = useMemo(() => {
-    const searchValue = search.toLowerCase().trim();
-
-    return candidateList.filter((candidate) => {
-      const matchesSearch =
-        !searchValue ||
-        candidate.name?.toLowerCase().includes(searchValue) ||
-        candidate.role?.toLowerCase().includes(searchValue) ||
-        candidate.skills?.toLowerCase().includes(searchValue);
-
-      const matchesRole =
-        roleFilter === "All" || candidate.role === roleFilter;
-
-      let matchesExperience = true;
-
-      if (experienceFilter !== "All") {
-        matchesExperience =
-          candidate.experienceYears === Number(experienceFilter);
-      }
-
-      const matchesLocation =
-        locationFilter === "All" || candidate.location === locationFilter;
-
-      const matchesStage =
-        stageFilter === "All" || candidate.stage === stageFilter;
-
-      let matchesMatch = true;
-
-      if (matchFilter === "80+") {
-        matchesMatch = candidate.match >= 80;
-      }
-
-      if (matchFilter === "85+") {
-        matchesMatch = candidate.match >= 85;
-      }
-
-      if (matchFilter === "90+") {
-        matchesMatch = candidate.match >= 90;
-      }
-
-      return (
-        matchesSearch &&
-        matchesRole &&
-        matchesExperience &&
-        matchesLocation &&
-        matchesStage &&
-        matchesMatch
-      );
-    });
-  }, [
-    candidates,
-    search,
-    roleFilter,
-    experienceFilter,
-    locationFilter,
-    stageFilter,
-    matchFilter,
-  ]);
-
-  /* =======================================================
-     PAGINATION
-  ======================================================= */
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredCandidates.length / rowsPerPage)
-  );
-
-  const paginatedCandidates = filteredCandidates.slice(
-    (tablePage - 1) * rowsPerPage,
-    tablePage * rowsPerPage
-  );
-
-  /* =======================================================
-     RESET FILTERS
-  ======================================================= */
-
-  const resetFilters = () => {
-    setSearch("");
-    setRoleFilter("All");
-    setExperienceFilter("All");
-    setLocationFilter("All");
+  // Reset Filters
+  function handleResetFilters() {
+    setJobFilter("All");
     setStageFilter("All");
-    setMatchFilter("All");
-    setTablePage(1);
+    setDateRangeFilter("All time");
+    setCustomStart("");
+    setCustomEnd("");
+  }
+
+  // Computed greeting and company info
+  const greeting = getGreeting();
+  const companyName = dashboardData.company?.name || user?.user_metadata?.company_name || "Company";
+  const companyLogo = dashboardData.company?.logo_url || null;
+
+  // Active filter chips
+  const activeChips = [];
+  if (jobFilter !== "All") {
+    const jobObj = dashboardData.availableJobProfiles.find((j) => j.id === jobFilter);
+    activeChips.push({
+      key: "job",
+      label: `Posting: ${jobObj?.title || jobFilter}`,
+      clear: () => setJobFilter("All"),
+    });
+  }
+  if (stageFilter !== "All") {
+    activeChips.push({
+      key: "stage",
+      label: `Stage: ${stageFilter}`,
+      clear: () => setStageFilter("All"),
+    });
+  }
+  if (dateRangeFilter !== "All time") {
+    const dateLabel =
+      dateRangeFilter === "Custom range" && (customStart || customEnd)
+        ? `Custom: ${customStart || "..."} to ${customEnd || "..."}`
+        : dateRangeFilter;
+    activeChips.push({
+      key: "date",
+      label: `Range: ${dateLabel}`,
+      clear: () => {
+        setDateRangeFilter("All time");
+        setCustomStart("");
+        setCustomEnd("");
+      },
+    });
+  }
+
+  // Attention total
+  const attention = dashboardData.attention || {};
+  const hasAttentionItems = (attention.attentionTotal || 0) > 0;
+
+  // Safe navigation helper
+  const navigate = (page) => {
+    if (typeof setActivePage === "function") {
+      setActivePage(page);
+    }
   };
 
-  /* =======================================================
-     PROFILE / EXPERIENCE CHART
-  ======================================================= */
-
-  const chartData =
-    profileChartType === "profiles"
-      ? profilesData || []
-      : experienceData || [];
-
-  if (loading) {
+  // Initial Full Loading State
+  if (loading && !dashboardData.company?.name && !refreshing) {
     return (
-      <div className="corporate-app" style={{ padding: "48px 24px", textAlign: "center", color: "var(--text-muted)" }}>
-        <p>Loading corporate dashboard...</p>
+      <div className="corporate-dashboard-root">
+        <div className="corporate-loading-state">
+          <RotateCw className="corporate-refresh-icon spinning" size={28} />
+          <p>Loading corporate dashboard...</p>
+        </div>
       </div>
     );
   }
 
-  if (error) {
+  // Fatal Error State
+  if (error && !dashboardData.company?.name) {
     return (
-      <div className="corporate-app" style={{ padding: "48px 24px", textAlign: "center", color: "crimson" }}>
-        <p>{error}</p>
+      <div className="corporate-dashboard-root">
+        <div className="corporate-error-state">
+          <AlertCircle size={32} color="#dc2626" />
+          <h2>Unable to Load Dashboard</h2>
+          <p>{error}</p>
+          <button
+            type="button"
+            className="corporate-btn-primary"
+            onClick={() => loadDashboardData(false)}
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="corporate-app">
-      {/* MAIN */}
-      <main className="corporate-main" style={{ marginLeft: 0, width: "100%" }}>
-
-
-        {/* CONTENT */}
-        <section className="corporate-content">
-          {/* GREETING */}
-          <div className="corporate-greeting">
-            <div>
-              <div className="corporate-greeting-label">TALENT OVERVIEW</div>
-              <h2>{greeting}</h2>
-              <p>
-                Explore the available talent pool and find candidates that match
-                your requirements.
-              </p>
-            </div>
-
-            <div className="corporate-greeting-icon">🏢</div>
+    <div className="corporate-dashboard-root">
+      {/* =========================================================
+          1. GREETING & HEADER
+      ========================================================= */}
+      <header className="corporate-header-bar">
+        <div className="corporate-header-left">
+          <div className="corporate-avatar-box" title={companyName}>
+            {companyLogo ? (
+              <img src={companyLogo} alt={companyName} className="corporate-avatar-img" />
+            ) : (
+              <span className="corporate-avatar-initials">{getInitials(companyName)}</span>
+            )}
           </div>
-
-          {/* KPI CARDS */}
-          <div className="corporate-stats">
-            <div className="corporate-stat-card">
-              <div className="corporate-stat-icon">👥</div>
-              <h3>{kpis?.availableCandidates ?? candidateList.length}</h3>
-              <p>Available Candidates</p>
-              <span className="corporate-stat-change">Talent Pool</span>
-            </div>
-
-            <div className="corporate-stat-card">
-              <div className="corporate-stat-icon">⭐</div>
-              <h3>{kpis?.matchingCandidates ?? 0}</h3>
-              <p>Matching Candidates</p>
-              <span className="corporate-stat-change">High relevance</span>
-            </div>
-
-            <div className="corporate-stat-card">
-              <div className="corporate-stat-icon">💼</div>
-              <h3>{kpis?.jobProfiles ?? 0}</h3>
-              <p>Job Profiles</p>
-              <span className="corporate-stat-change">Specializations</span>
-            </div>
-
-            <div className="corporate-stat-card">
-              <div className="corporate-stat-icon">📍</div>
-              <h3>{kpis?.locations ?? 0}</h3>
-              <p>Candidate Locations</p>
-              <span className="corporate-stat-change">Available cities</span>
-            </div>
-          </div>
-
-          {/* TALENT PROFILE ANALYTICS */}
-          <div className="corporate-chart-card">
-            <div className="corporate-card-header">
-              <div>
-                <h3>Talent Pool Overview</h3>
-                <p>Explore available candidates by profile and experience</p>
-              </div>
-
-              <div className="corporate-toggle">
-                <button
-                  className={profileChartType === "profiles" ? "active" : ""}
-                  onClick={() => setProfileChartType("profiles")}
-                  type="button"
-                >
-                  Profiles
-                </button>
-
-                <button
-                  className={profileChartType === "experience" ? "active" : ""}
-                  onClick={() => setProfileChartType("experience")}
-                  type="button"
-                >
-                  Experience
-                </button>
-              </div>
-            </div>
-
-            <div className="corporate-chart-container">
-              {profileChartType === "profiles" ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={chartData}
-                    layout="vertical"
-                    margin={{
-                      left: 20,
-                      right: 25,
-                      top: 5,
-                      bottom: 5,
-                    }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#eeeaf3" />
-                    <XAxis
-                      type="number"
-                      stroke="#9995ae"
-                      tick={{ fontSize: 10 }}
-                    />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={125}
-                      stroke="#9995ae"
-                      tick={{ fontSize: 10 }}
-                    />
-                    <Tooltip />
-                    <Bar
-                      dataKey="candidates"
-                      name="Candidates"
-                      fill="#743bf1"
-                      radius={[0, 5, 5, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={chartData}
-                      dataKey="candidates"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={95}
-                      paddingAngle={3}
-                      label
-                    >
-                      {chartData.map((entry, index) => (
-                        <Cell
-                          key={entry.name || index}
-                          fill={COLORS[index % COLORS.length]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-
-          {/* LOCATION + TOP PROFILES */}
-          <div className="corporate-two-column">
-            {/* LOCATION */}
-            <div className="corporate-card">
-              <div className="corporate-card-header">
-                <div>
-                  <h3>Candidate Locations</h3>
-                  <p>Where available candidates are located</p>
-                </div>
-              </div>
-
-              <div className="corporate-location-list">
-                {(locationsData || []).map((location) => (
-                  <div className="corporate-location-row" key={location.name}>
-                    <div>
-                      <span>📍</span>
-                      <strong>{location.name}</strong>
-                    </div>
-                    <div>
-                      <strong>{location.candidates ?? location.count ?? 0}</strong>
-                      <span>candidates</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* TOP SPECIALIZATIONS */}
-            <div className="corporate-card">
-              <div className="corporate-card-header">
-                <div>
-                  <h3>Available Specializations</h3>
-                  <p>Most available candidate profiles</p>
-                </div>
-              </div>
-
-              <div className="corporate-profile-list">
-                {(profilesData || []).map((profile, index) => (
-                  <div className="corporate-profile-row" key={profile.name}>
-                    <div>
-                      <span className="corporate-profile-number">
-                        {index + 1}
-                      </span>
-                      <strong>{profile.name}</strong>
-                    </div>
-                    <div>
-                      <strong>{profile.candidates}</strong>
-                      <span>candidates</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* RECOMMENDED CANDIDATES */}
-          <div className="corporate-card">
-            <div className="corporate-card-header">
-              <div>
-                <h3>Recommended Candidates</h3>
-                <p>Find candidates based on your hiring requirements</p>
-              </div>
-
-              <button
-                className="corporate-details-button"
-                onClick={() => setShowCandidateTable(true)}
-                type="button"
-              >
-                View All Candidates
-              </button>
-            </div>
-
-            {/* FILTER BAR */}
-            <div className="corporate-quick-filters">
-              <div className="corporate-filter-field">
-                <label>Job Profile</label>
-                <select
-                  value={roleFilter}
-                  onChange={(e) =>
-                    updateTableFilter(setRoleFilter, e.target.value)
-                  }
-                >
-                  {jobProfiles.map((profile) => (
-                    <option key={profile} value={profile}>
-                      {profile === "All" ? "All Profiles" : profile}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="corporate-filter-field">
-                <label>Experience</label>
-                <select
-                  value={experienceFilter}
-                  onChange={(e) => setExperienceFilter(e.target.value)}
-                >
-                  <option value="All">All Experience</option>
-                  {experienceOptions
-                    .filter((value) => value !== "All")
-                    .map((value) => (
-                      <option key={value} value={value}>
-                        {value} {value === 1 ? "Year" : "Years"}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div className="corporate-filter-field">
-                <label>Location</label>
-                <select
-                  value={locationFilter}
-                  onChange={(e) => setLocationFilter(e.target.value)}
-                >
-                  {locationOptions.map((location) => (
-                    <option key={location} value={location}>
-                      {location === "All" ? "All Locations" : location}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="corporate-filter-field">
-                <label>Match Score</label>
-                <select
-                  value={matchFilter}
-                  onChange={(e) => setMatchFilter(e.target.value)}
-                >
-                  <option value="All">All Scores</option>
-                  <option value="80+">80%+</option>
-                  <option value="85+">85%+</option>
-                  <option value="90+">90%+</option>
-                </select>
-              </div>
-
-              <button
-                className="corporate-reset-filter"
-                onClick={resetFilters}
-                type="button"
-              >
-                Reset
-              </button>
-            </div>
-
-            {/* RESULT COUNT */}
-            <div className="corporate-filter-result">
-              <span>
-                Showing <strong>{filteredCandidates.length}</strong> matching candidates
-              </span>
-              {roleFilter !== "All" && (
-                <span className="corporate-active-filter">
-                  Profile: {roleFilter}
-                </span>
-              )}
-            </div>
-
-            {/* RECOMMENDED TABLE */}
-            <div className="corporate-table-wrapper">
-              <table className="corporate-table">
-                <thead>
-                  <tr>
-                    <th>Candidate</th>
-                    <th>Profile</th>
-                    <th>Match</th>
-                    <th>Experience</th>
-                    <th>Location</th>
-                    <th>Skills</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filteredCandidates
-                    .slice()
-                    .sort((a, b) => b.match - a.match)
-                    .slice(0, 5)
-                    .map((candidate) => (
-                      <tr key={candidate.id}>
-                        <td>
-                          <div className="corporate-candidate-name">
-                            <div className="corporate-avatar">
-                              {candidate.name?.charAt(0) || "?"}
-                            </div>
-                            <strong>{candidate.name}</strong>
-                          </div>
-                        </td>
-                        <td>{candidate.role}</td>
-                        <td>
-                          <span className="match-score">{candidate.match}%</span>
-                        </td>
-                        <td>{candidate.experience}</td>
-                        <td>{candidate.location}</td>
-                        <td>{candidate.skills}</td>
-                        <td>
-                          <button
-                            className="corporate-view-button"
-                            onClick={() => setSelectedCandidate(candidate)}
-                            type="button"
-                          >
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-
-                  {filteredCandidates.length === 0 && (
-                    <tr>
-                      <td colSpan="7" className="corporate-empty">
-                        No candidates match the selected filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      </main>
-
-      {/* FULL CANDIDATE TABLE MODAL */}
-      {showCandidateTable && (
-        <div
-          className="corporate-modal-overlay"
-          onClick={() => setShowCandidateTable(false)}
-        >
-          <div
-            className="corporate-modal corporate-large-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="corporate-modal-header">
-              <div>
-                <h3>Candidate Table</h3>
-                <p>Search and explore available candidates</p>
-              </div>
-              <button
-                className="corporate-modal-close"
-                onClick={() => setShowCandidateTable(false)}
-                type="button"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="corporate-filters">
-              <input
-                type="text"
-                placeholder="Search candidate, profile or skill..."
-                value={search}
-                onChange={(e) =>
-                  updateTableFilter(setSearch, e.target.value)
-                }
-              />
-
-              <select
-                value={roleFilter}
-                onChange={(e) =>
-                  updateTableFilter(setRoleFilter, e.target.value)
-                }
-              >
-                {jobProfiles.map((profile) => (
-                  <option key={profile} value={profile}>
-                    {profile === "All" ? "All Profiles" : profile}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={experienceFilter}
-                onChange={(e) => setExperienceFilter(e.target.value)}
-              >
-                <option value="All">All Experience</option>
-                {experienceOptions
-                  .filter((value) => value !== "All")
-                  .map((value) => (
-                    <option key={value} value={value}>
-                      {value} {value === 1 ? "Year" : "Years"}
-                    </option>
-                  ))}
-              </select>
-
-              <select
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
-              >
-                {locationOptions.map((location) => (
-                  <option key={location} value={location}>
-                    {location === "All" ? "All Locations" : location}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={stageFilter}
-                onChange={(e) => setStageFilter(e.target.value)}
-              >
-                {stageOptions.map((stage) => (
-                  <option key={stage} value={stage}>
-                    {stage === "All" ? "All Stages" : stage}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="corporate-modal-match-filter">
-              <label>Match Score</label>
-              <select
-                value={matchFilter}
-                onChange={(e) => setMatchFilter(e.target.value)}
-              >
-                <option value="All">All Scores</option>
-                <option value="80+">80%+</option>
-                <option value="85+">85%+</option>
-                <option value="90+">90%+</option>
-              </select>
-
-              <button
-                className="corporate-reset-filter"
-                onClick={resetFilters}
-                type="button"
-              >
-                Reset Filters
-              </button>
-            </div>
-
-            <div className="corporate-table-wrapper">
-              <table className="corporate-table">
-                <thead>
-                  <tr>
-                    <th>Candidate</th>
-                    <th>Profile</th>
-                    <th>Match</th>
-                    <th>Resume</th>
-                    <th>Experience</th>
-                    <th>Skills</th>
-                    <th>Location</th>
-                    <th>Stage</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {paginatedCandidates.length > 0 ? (
-                    paginatedCandidates.map((candidate) => (
-                      <tr key={candidate.id}>
-                        <td>
-                          <strong>{candidate.name}</strong>
-                        </td>
-                        <td>{candidate.role}</td>
-                        <td>
-                          <span className="match-score">{candidate.match}%</span>
-                        </td>
-                        <td>{candidate.resumeScore}</td>
-                        <td>{candidate.experience}</td>
-                        <td>{candidate.skills}</td>
-                        <td>{candidate.location}</td>
-                        <td>
-                          <span
-                            className={`corporate-status ${candidate.stage
-                              ?.toLowerCase()
-                              .replace(" ", "-")}`}
-                          >
-                            {candidate.stage}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            className="corporate-view-button"
-                            onClick={() => setSelectedCandidate(candidate)}
-                            type="button"
-                          >
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="9" className="corporate-empty">
-                        No candidates found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="corporate-pagination">
-              <span>
-                Showing{" "}
-                {filteredCandidates.length === 0
-                  ? 0
-                  : (tablePage - 1) * rowsPerPage + 1}{" "}
-                -{" "}
-                {Math.min(
-                  tablePage * rowsPerPage,
-                  filteredCandidates.length
-                )}{" "}
-                of {filteredCandidates.length}
-              </span>
-
-              <div>
-                <button
-                  disabled={tablePage === 1}
-                  onClick={() => setTablePage((page) => Math.max(1, page - 1))}
-                  type="button"
-                >
-                  ←
-                </button>
-                <span>
-                  {tablePage} / {totalPages}
-                </span>
-                <button
-                  disabled={tablePage === totalPages}
-                  onClick={() =>
-                    setTablePage((page) => Math.min(totalPages, page + 1))
-                  }
-                  type="button"
-                >
-                  →
-                </button>
-              </div>
-            </div>
-
-            <div className="corporate-modal-footer">
-              <button
-                className="corporate-close-button"
-                onClick={() => setShowCandidateTable(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
+          <div className="corporate-title-block">
+            <span className="corporate-workspace-chip">{companyName}</span>
+            <h1 className="corporate-greeting-title">
+              {greeting}, {companyName}
+            </h1>
           </div>
         </div>
+
+        <div className="corporate-header-right">
+          {refreshError && (
+            <span className="corporate-refresh-toast" role="alert">
+              {refreshError}
+            </span>
+          )}
+          <button
+            type="button"
+            className="corporate-refresh-btn"
+            disabled={refreshing || loading}
+            onClick={() => loadDashboardData(true)}
+            aria-label="Refresh dashboard"
+          >
+            <RotateCw
+              className={`corporate-refresh-icon ${refreshing ? "spinning" : ""}`}
+              size={14}
+            />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      {/* =========================================================
+          2. GLOBAL FILTERS & REMOVABLE CHIPS
+      ========================================================= */}
+      <section className="corporate-filters-section">
+        <div className="corporate-filters-row">
+          {/* Job Posting Filter */}
+          <DropdownFilter
+            label="Job posting"
+            value={jobFilter}
+            onChange={setJobFilter}
+            defaultLabel="All postings"
+            options={dashboardData.availableJobProfiles}
+            getItemLabel={(opt) => opt?.title || opt}
+            getItemValue={(opt) => opt?.id || opt}
+            searchable
+          />
+
+          {/* Application Stage Filter */}
+          <DropdownFilter
+            label="Application stage"
+            value={stageFilter}
+            onChange={setStageFilter}
+            defaultLabel="All stages"
+            options={
+              dashboardData.availableStages.length > 0
+                ? dashboardData.availableStages
+                : ["Resume Review", "Aptitude", "GD", "Interview", "Selected", "Joined"]
+            }
+            searchable
+          />
+
+          {/* Date Range Filter */}
+          <DropdownFilter
+            label="Date range"
+            value={dateRangeFilter}
+            onChange={setDateRangeFilter}
+            defaultLabel="All time"
+            options={[
+              "Today",
+              "This week",
+              "This month",
+              "Last 3 months",
+              "This year",
+              "Custom range",
+            ]}
+          />
+
+          {/* Reset Filters Button */}
+          <div className="corporate-filter-action-box">
+            <button
+              type="button"
+              className="corporate-reset-btn"
+              onClick={handleResetFilters}
+            >
+              Reset filters
+            </button>
+          </div>
+        </div>
+
+        {/* Custom Date Range Inputs */}
+        {dateRangeFilter === "Custom range" && (
+          <div className="corporate-custom-date-row">
+            <div className="corporate-date-field">
+              <label>Start date (IST)</label>
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+              />
+            </div>
+            <div className="corporate-date-field">
+              <label>End date (IST)</label>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Removable Active Filter Chips */}
+        {activeChips.length > 0 && (
+          <div className="corporate-chips-bar">
+            <span className="corporate-chips-label">Active filters:</span>
+            {activeChips.map((chip) => (
+              <span key={chip.key} className="corporate-filter-chip">
+                <span>{chip.label}</span>
+                <button
+                  type="button"
+                  className="corporate-chip-remove-btn"
+                  onClick={chip.clear}
+                  aria-label={`Remove filter ${chip.label}`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* =========================================================
+          3. NEEDS YOUR ATTENTION (Rendered ONLY when count > 0)
+      ========================================================= */}
+      {hasAttentionItems && (
+        <section className="corporate-attention-section" aria-label="Action items needing your attention">
+          <div className="corporate-attention-header">
+            <div className="corporate-attention-title-wrap">
+              <AlertCircle size={18} className="corporate-attention-icon" />
+              <h3>Needs your attention</h3>
+            </div>
+            <span className="corporate-attention-total-badge">
+              {attention.attentionTotal} pending
+            </span>
+          </div>
+
+          <div className="corporate-attention-cards-grid">
+            {/* Applications awaiting review */}
+            {(attention.applicationsAwaitingReview || 0) > 0 && (
+              <div
+                className="corporate-attention-card clickable"
+                onClick={() => {
+                  setStageFilter("Resume Review");
+                  navigate("resume");
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="corporate-attention-count-bubble">
+                  {attention.applicationsAwaitingReview}
+                </div>
+                <div className="corporate-attention-card-text">
+                  <strong>Applications awaiting review</strong>
+                  <p>Screen resumes and shortlist candidates</p>
+                </div>
+                <ArrowRight size={15} className="corporate-card-arrow" />
+              </div>
+            )}
+
+            {/* Interviews needing feedback */}
+            {(attention.interviewsNeedingFeedback || 0) > 0 && (
+              <div
+                className="corporate-attention-card clickable"
+                onClick={() => navigate("interview")}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="corporate-attention-count-bubble">
+                  {attention.interviewsNeedingFeedback}
+                </div>
+                <div className="corporate-attention-card-text">
+                  <strong>Interviews needing feedback</strong>
+                  <p>Submit round scores and recommendations</p>
+                </div>
+                <ArrowRight size={15} className="corporate-card-arrow" />
+              </div>
+            )}
+
+            {/* Offers awaiting response */}
+            {(attention.offersAwaitingResponse || 0) > 0 && (
+              <div
+                className="corporate-attention-card clickable"
+                onClick={() => navigate("offers")}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="corporate-attention-count-bubble">
+                  {attention.offersAwaitingResponse}
+                </div>
+                <div className="corporate-attention-card-text">
+                  <strong>Offers awaiting candidate response</strong>
+                  <p>Track sent offers and follow up with applicants</p>
+                </div>
+                <ArrowRight size={15} className="corporate-card-arrow" />
+              </div>
+            )}
+
+            {/* Joinings to confirm */}
+            {(attention.joiningsToConfirm || 0) > 0 && (
+              <div
+                className="corporate-attention-card clickable"
+                onClick={() => navigate("joining")}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="corporate-attention-count-bubble">
+                  {attention.joiningsToConfirm}
+                </div>
+                <div className="corporate-attention-card-text">
+                  <strong>Joinings to confirm</strong>
+                  <p>Verify candidate onboarding status</p>
+                </div>
+                <ArrowRight size={15} className="corporate-card-arrow" />
+              </div>
+            )}
+          </div>
+        </section>
       )}
 
-      {/* CANDIDATE DETAILS MODAL */}
+      {/* =========================================================
+          4. FIVE KPI CARDS + TALENT POOL NOTE
+      ========================================================= */}
+      <section className="corporate-kpis-section">
+        <div className="corporate-kpis-grid">
+          {/* KPI 1: Open Job Postings */}
+          <div
+            className="corporate-kpi-card clickable"
+            onClick={() => navigate("jobs")}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="corporate-kpi-top">
+              <span className="corporate-kpi-label">Open job postings</span>
+              <div className="corporate-kpi-icon-box">
+                <Briefcase size={16} />
+              </div>
+            </div>
+            <div className="corporate-kpi-value">{dashboardData.kpis?.openJobPostings ?? 0}</div>
+            <div className="corporate-kpi-subtitle">Active roles accepting applications</div>
+          </div>
+
+          {/* KPI 2: Applications Received */}
+          <div
+            className="corporate-kpi-card clickable"
+            onClick={() => navigate("pipeline")}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="corporate-kpi-top">
+              <span className="corporate-kpi-label">Applications received</span>
+              <div className="corporate-kpi-icon-box">
+                <Users size={16} />
+              </div>
+            </div>
+            <div className="corporate-kpi-value">
+              {dashboardData.kpis?.applicationsReceived ?? 0}
+            </div>
+            <div className="corporate-kpi-subtitle">Distinct applications to your roles</div>
+          </div>
+
+          {/* KPI 3: Interviews Scheduled */}
+          <div
+            className="corporate-kpi-card clickable"
+            onClick={() => navigate("interview")}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="corporate-kpi-top">
+              <span className="corporate-kpi-label">Interviews scheduled</span>
+              <div className="corporate-kpi-icon-box">
+                <Calendar size={16} />
+              </div>
+            </div>
+            <div className="corporate-kpi-value">
+              {dashboardData.kpis?.interviewsScheduled ?? 0}
+            </div>
+            <div className="corporate-kpi-subtitle">Upcoming scheduled interviews</div>
+          </div>
+
+          {/* KPI 4: Offers Pending */}
+          <div
+            className="corporate-kpi-card clickable"
+            onClick={() => navigate("offers")}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="corporate-kpi-top">
+              <span className="corporate-kpi-label">Offers pending</span>
+              <div className="corporate-kpi-icon-box">
+                <Award size={16} />
+              </div>
+            </div>
+            <div className="corporate-kpi-value">{dashboardData.kpis?.offersPending ?? 0}</div>
+            <div className="corporate-kpi-subtitle">Offers sent awaiting candidate response</div>
+          </div>
+
+          {/* KPI 5: Joined */}
+          <div
+            className="corporate-kpi-card clickable"
+            onClick={() => navigate("joining")}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="corporate-kpi-top">
+              <span className="corporate-kpi-label">Joined</span>
+              <div className="corporate-kpi-icon-box">
+                <CheckCircle2 size={16} />
+              </div>
+            </div>
+            <div className="corporate-kpi-value">{dashboardData.kpis?.joined ?? 0}</div>
+            <div className="corporate-kpi-subtitle">Verified joining records</div>
+          </div>
+        </div>
+
+        {/* Talent pool size as a small line with link to Candidate Search */}
+        <div className="corporate-talent-pool-line">
+          <span>
+            Campus talent pool:{" "}
+            <strong>{(dashboardData.kpis?.talentPoolSize ?? 0).toLocaleString()}</strong>{" "}
+            verified candidates available across partner institutions.
+          </span>
+          <button
+            type="button"
+            className="corporate-inline-link-btn"
+            onClick={() => navigate("candidateSearch")}
+          >
+            Candidate Search <ExternalLink size={12} />
+          </button>
+        </div>
+      </section>
+
+      {/* =========================================================
+          5. HIRING PIPELINE + APPLICATIONS BY JOB POSTING
+      ========================================================= */}
+      <section className="corporate-analytics-grid">
+        {/* HIRING PIPELINE */}
+        <div className="corporate-analytics-card">
+          <div className="corporate-analytics-header">
+            <div>
+              <h3 className="corporate-analytics-title">Hiring pipeline</h3>
+              <p className="corporate-analytics-subtitle">Candidate progression across stages</p>
+            </div>
+            <div className="corporate-tooltip-wrap" title="Conversion rates between consecutive stages are displayed only when the prior stage cohort has at least 10 applicants to ensure statistical validity.">
+              <Info size={15} className="corporate-info-icon" />
+            </div>
+          </div>
+
+          <div className="corporate-chart-wrapper">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart
+                data={dashboardData.pipeline}
+                margin={{ top: 12, right: 16, left: -10, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0edf5" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  stroke="#8C91A0"
+                  tick={{ fontSize: 11, fontWeight: 500 }}
+                  interval={0}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  stroke="#8C91A0"
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(v) => Math.round(v)}
+                />
+                <Tooltip
+                  formatter={(value, name) => [value, "Candidates"]}
+                  labelFormatter={(label) => `Stage: ${label}`}
+                  contentStyle={{
+                    borderRadius: 8,
+                    border: "1px solid #E2E4E9",
+                    fontSize: 12,
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                  }}
+                />
+                <Legend
+                  verticalAlign="top"
+                  align="right"
+                  wrapperStyle={{ fontSize: 12, paddingBottom: 10 }}
+                />
+                <Bar
+                  dataKey="count"
+                  name="Candidates"
+                  fill="#6D3AE8"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={48}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Pipeline Conversion Indicators */}
+          <div className="corporate-pipeline-stages-flow">
+            {dashboardData.pipeline.map((p, idx) => (
+              <div key={p.stage} className="corporate-pipeline-stage-pill">
+                <span className="corporate-pipeline-stage-name">{p.label}</span>
+                <span className="corporate-pipeline-stage-count">{p.count}</span>
+                {idx > 0 && p.conversion !== null && (
+                  <span className="corporate-pipeline-conversion" title={`Conversion from ${dashboardData.pipeline[idx - 1].label}`}>
+                    {p.conversion}%
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* APPLICATIONS BY JOB POSTING */}
+        <div className="corporate-analytics-card">
+          <div className="corporate-analytics-header">
+            <div>
+              <h3 className="corporate-analytics-title">Applications by job posting</h3>
+              <p className="corporate-analytics-subtitle">Volume of applications per active role</p>
+            </div>
+          </div>
+
+          <div className="corporate-chart-wrapper">
+            {dashboardData.applicationsByJob.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart
+                  data={dashboardData.applicationsByJob}
+                  layout="vertical"
+                  margin={{ top: 12, right: 24, left: 24, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0edf5" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    allowDecimals={false}
+                    stroke="#8C91A0"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => Math.round(v)}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="title"
+                    stroke="#8C91A0"
+                    tick={{ fontSize: 11 }}
+                    width={130}
+                  />
+                  <Tooltip
+                    formatter={(value) => [value, "Applications"]}
+                    contentStyle={{
+                      borderRadius: 8,
+                      border: "1px solid #E2E4E9",
+                      fontSize: 12,
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    }}
+                  />
+                  <Legend
+                    verticalAlign="top"
+                    align="right"
+                    wrapperStyle={{ fontSize: 12, paddingBottom: 10 }}
+                  />
+                  <Bar
+                    dataKey="applications"
+                    name="Applications"
+                    fill="#079B6D"
+                    radius={[0, 4, 4, 0]}
+                    maxBarSize={30}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="corporate-empty-chart">
+                <p>No applications received yet for your active postings.</p>
+                <button
+                  type="button"
+                  className="corporate-inline-link-btn"
+                  onClick={() => navigate("jobs")}
+                >
+                  Manage job postings →
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Note about other postings with 0 applications */}
+          {dashboardData.zeroApplicationsCount > 0 && (
+            <div className="corporate-zero-jobs-note">
+              <span>
+                {dashboardData.zeroApplicationsCount}{" "}
+                {dashboardData.zeroApplicationsCount === 1
+                  ? "other posting has"
+                  : "other postings have"}{" "}
+                no applications yet.
+              </span>
+              <button
+                type="button"
+                className="corporate-inline-link-btn"
+                onClick={() => navigate("jobs")}
+              >
+                Share postings →
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* =========================================================
+          6. RECOMMENDED CANDIDATES (Max 5 rows)
+      ========================================================= */}
+      <section className="corporate-candidates-section">
+        <div className="corporate-section-header">
+          <div>
+            <h3 className="corporate-section-title">Recommended candidates</h3>
+            <p className="corporate-section-subtitle">
+              Candidates who recently applied to your company roles
+            </p>
+          </div>
+          <button
+            type="button"
+            className="corporate-details-link-btn"
+            onClick={() => navigate("candidateSearch")}
+          >
+            View all candidates <ArrowRight size={14} />
+          </button>
+        </div>
+
+        <div className="corporate-table-wrapper">
+          <table className="corporate-table">
+            <thead>
+              <tr>
+                <th>Candidate</th>
+                <th>Job profile</th>
+                <th>Experience</th>
+                <th>Location</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dashboardData.recommendedCandidates.length > 0 ? (
+                dashboardData.recommendedCandidates.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <div className="corporate-candidate-cell">
+                        <div className="corporate-cand-avatar">
+                          {c.name ? c.name.charAt(0).toUpperCase() : "?"}
+                        </div>
+                        <div className="corporate-cand-info">
+                          <strong>{c.name}</strong>
+                          {c.email && <span className="corporate-cand-email">{c.email}</span>}
+                        </div>
+                      </div>
+                    </td>
+                    <td>{c.role || <span className="corporate-missing-val">Not added</span>}</td>
+                    <td>
+                      {c.experience ? (
+                        <span>{c.experience}</span>
+                      ) : (
+                        <span className="corporate-missing-val">Not added</span>
+                      )}
+                    </td>
+                    <td>
+                      {c.location ? (
+                        <span>{c.location}</span>
+                      ) : (
+                        <span className="corporate-missing-val">Not added</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="corporate-view-btn"
+                        onClick={() => setSelectedCandidate(c)}
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="corporate-table-empty">
+                    No candidates match the selected filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* =========================================================
+          CANDIDATE DETAIL PREVIEW MODAL
+      ========================================================= */}
       {selectedCandidate && (
         <div
-          className="corporate-modal-overlay"
+          className="corporate-modal-backdrop"
           onClick={() => setSelectedCandidate(null)}
+          role="dialog"
+          aria-modal="true"
         >
           <div
-            className="corporate-modal"
+            className="corporate-modal-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="corporate-modal-header">
-              <div>
-                <h3>{selectedCandidate.name}</h3>
-                <p>Candidate Details</p>
+            <div className="corporate-modal-head">
+              <div className="corporate-modal-cand-head">
+                <div className="corporate-modal-avatar">
+                  {selectedCandidate.name?.charAt(0).toUpperCase() || "?"}
+                </div>
+                <div>
+                  <h3 className="corporate-modal-name">{selectedCandidate.name}</h3>
+                  <p className="corporate-modal-role">{selectedCandidate.role}</p>
+                </div>
               </div>
               <button
-                className="corporate-modal-close"
-                onClick={() => setSelectedCandidate(null)}
                 type="button"
+                className="corporate-modal-close-btn"
+                onClick={() => setSelectedCandidate(null)}
+                aria-label="Close dialog"
               >
-                ×
+                <X size={18} />
               </button>
             </div>
 
-            <div className="corporate-detail-grid">
-              <div>
-                <span>PROFILE</span>
-                <strong>{selectedCandidate.role}</strong>
+            <div className="corporate-modal-body">
+              <div className="corporate-modal-grid">
+                <div className="corporate-modal-field">
+                  <span className="corporate-field-label">Current stage</span>
+                  <strong className="corporate-field-value">{selectedCandidate.stage}</strong>
+                </div>
+
+                <div className="corporate-modal-field">
+                  <span className="corporate-field-label">Experience</span>
+                  <strong className="corporate-field-value">
+                    {selectedCandidate.experience || (
+                      <span className="corporate-missing-val">Not added</span>
+                    )}
+                  </strong>
+                </div>
+
+                <div className="corporate-modal-field">
+                  <span className="corporate-field-label">Location</span>
+                  <strong className="corporate-field-value">
+                    {selectedCandidate.location || (
+                      <span className="corporate-missing-val">Not added</span>
+                    )}
+                  </strong>
+                </div>
+
+                <div className="corporate-modal-field">
+                  <span className="corporate-field-label">Email</span>
+                  <strong className="corporate-field-value">
+                    {selectedCandidate.email || (
+                      <span className="corporate-missing-val">Not added</span>
+                    )}
+                  </strong>
+                </div>
+
+                <div className="corporate-modal-field">
+                  <span className="corporate-field-label">Phone</span>
+                  <strong className="corporate-field-value">
+                    {selectedCandidate.phone || (
+                      <span className="corporate-missing-val">Not added</span>
+                    )}
+                  </strong>
+                </div>
+
+                <div className="corporate-modal-field">
+                  <span className="corporate-field-label">Application date</span>
+                  <strong className="corporate-field-value">
+                    {selectedCandidate.created_at
+                      ? new Date(selectedCandidate.created_at).toLocaleDateString("en-IN", {
+                          timeZone: "Asia/Kolkata",
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      : "—"}
+                  </strong>
+                </div>
               </div>
-              <div>
-                <span>MATCH SCORE</span>
-                <strong>{selectedCandidate.match}%</strong>
-              </div>
-              <div>
-                <span>RESUME SCORE</span>
-                <strong>{selectedCandidate.resumeScore}</strong>
-              </div>
-              <div>
-                <span>EXPERIENCE</span>
-                <strong>{selectedCandidate.experience}</strong>
-              </div>
-              <div>
-                <span>SKILLS</span>
-                <strong>{selectedCandidate.skills}</strong>
-              </div>
-              <div>
-                <span>LOCATION</span>
-                <strong>{selectedCandidate.location}</strong>
-              </div>
-              <div>
-                <span>CURRENT STAGE</span>
-                <strong>{selectedCandidate.stage}</strong>
-              </div>
-              <div>
-                <span>SOURCE</span>
-                <strong>{selectedCandidate.source}</strong>
-              </div>
-              <div>
-                <span>EMAIL</span>
-                <strong>{selectedCandidate.email}</strong>
-              </div>
-              <div>
-                <span>PHONE</span>
-                <strong>{selectedCandidate.phone}</strong>
-              </div>
+
+              {selectedCandidate.resume_url && (
+                <div className="corporate-modal-resume-wrap">
+                  <a
+                    href={selectedCandidate.resume_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="corporate-resume-link"
+                  >
+                    View submitted resume <ExternalLink size={14} />
+                  </a>
+                </div>
+              )}
             </div>
 
-            <div className="corporate-modal-footer">
+            <div className="corporate-modal-foot">
               <button
-                className="corporate-close-button"
-                onClick={() => setSelectedCandidate(null)}
                 type="button"
+                className="corporate-modal-close-action"
+                onClick={() => setSelectedCandidate(null)}
               >
                 Close
               </button>
@@ -937,5 +1124,3 @@ function CorporateDashboard({
     </div>
   );
 }
-
-export default CorporateDashboard;

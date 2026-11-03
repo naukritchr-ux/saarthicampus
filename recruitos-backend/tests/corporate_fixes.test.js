@@ -166,19 +166,61 @@ test('Corporate Phase 2 Architecture & Isolation Test Suite', async (t) => {
   // Test route 1: GET /api/corporate/kpis
   app.get('/api/corporate/kpis', requireCorporate, async (req, res) => {
     const profile = req.userProfile;
-    if (!profile.company_id) {
-      return res.json({ jobsPosted: 0, applications: 0 });
+    if (!profile || !profile.company_id) {
+      return res.status(403).json({ error: 'Company association required' });
     }
     const { data: jobList } = await mockSupabase.from('job_profiles').select('*').eq('company_id', profile.company_id);
-    const jIds = (jobList || []).map((j) => j.id);
-    const { data: appList } = await mockSupabase.from('applications').select('*').in('job_id', jIds);
+    const allCompanyJobIds = (jobList || []).map((j) => j.id);
+
+    const { job_id, stage } = req.query;
+    let targetJobIds = allCompanyJobIds;
+    if (job_id && job_id !== 'All') {
+      if (!allCompanyJobIds.includes(job_id)) {
+        return res.status(403).json({ error: 'Access denied: job does not belong to your company' });
+      }
+      targetJobIds = [job_id];
+    }
+
+    const { data: appList } = await mockSupabase.from('applications').select('*').in('job_id', targetJobIds);
+    let filteredApps = appList || [];
+    if (stage && stage !== 'All') {
+      filteredApps = filteredApps.filter((a) => a.stage === stage);
+    }
 
     res.json({
-      jobsPosted: jIds.length,
-      activeJobs: jIds.length,
-      applications: (appList || []).length,
-      shortlisted: (appList || []).filter((a) => a.stage === 'Interview').length,
-      interviews: (appList || []).filter((a) => a.stage === 'Interview').length,
+      company: { id: profile.company_id, name: profile.company_id === 'comp-alpha' ? 'Alpha Inc' : 'Beta Corp' },
+      kpis: {
+        openJobPostings: targetJobIds.length,
+        applicationsReceived: filteredApps.length,
+        interviewsScheduled: filteredApps.filter((a) => a.stage === 'Interview').length,
+        offersPending: 0,
+        joined: 0,
+        talentPoolSize: 2,
+      },
+      attention: {
+        applicationsAwaitingReview: filteredApps.filter((a) => a.stage === 'Resume Review').length,
+        interviewsNeedingFeedback: 0,
+        offersAwaitingResponse: 0,
+        joiningsToConfirm: 0,
+        attentionTotal: filteredApps.filter((a) => a.stage === 'Resume Review').length,
+      },
+      pipeline: [
+        { stage: 'Resume Review', label: 'Resume review', count: filteredApps.filter((a) => a.stage === 'Resume Review').length, conversion: null },
+        { stage: 'Aptitude', label: 'Aptitude', count: filteredApps.filter((a) => a.stage === 'Aptitude').length, conversion: null },
+        { stage: 'GD', label: 'GD', count: filteredApps.filter((a) => a.stage === 'GD').length, conversion: null },
+        { stage: 'Interview', label: 'Interview', count: filteredApps.filter((a) => a.stage === 'Interview').length, conversion: null },
+        { stage: 'Selected', label: 'Selected', count: filteredApps.filter((a) => a.stage === 'Selected').length, conversion: null },
+        { stage: 'Joined', label: 'Joined', count: filteredApps.filter((a) => a.stage === 'Joined').length, conversion: null },
+      ],
+      applicationsByJob: [{ id: targetJobIds[0], title: 'Test Job', applications: filteredApps.length }],
+      zeroApplicationsCount: 0,
+      recommendedCandidates: [],
+      // Backward compatibility fields
+      jobsPosted: targetJobIds.length,
+      activeJobs: targetJobIds.length,
+      applications: filteredApps.length,
+      shortlisted: filteredApps.filter((a) => a.stage === 'Interview').length,
+      interviews: filteredApps.filter((a) => a.stage === 'Interview').length,
       offers: 0,
       joined: 0,
       matchRate: 85,
@@ -371,5 +413,50 @@ test('Corporate Phase 2 Architecture & Isolation Test Suite', async (t) => {
       body: JSON.stringify({ candidate_id: 'cand-2', job_id: 'job-beta', type: 'Mock' }),
     });
     assert.strictEqual(res.status, 403);
+  });
+
+  // 11. Multi-Tenant Dashboard Isolation: Corporate B receives only Company B metrics
+  await t.test('11. Corporate B receives metrics strictly scoped to Company B', async () => {
+    const res = await fetch(`${baseUrl}/api/corporate/kpis`, {
+      headers: { Authorization: 'Bearer corp-b-token' },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.company.id, 'comp-beta');
+    assert.strictEqual(body.kpis.openJobPostings, 1);
+    assert.strictEqual(body.kpis.applicationsReceived, 1);
+    assert.strictEqual(body.pipeline.find((p) => p.stage === 'Selected').count, 1);
+    assert.strictEqual(body.pipeline.find((p) => p.stage === 'Interview').count, 0);
+  });
+
+  // 12. Corporate A is BLOCKED with 403 when passing Company B job_id filter
+  await t.test('12. Corporate A is BLOCKED with 403 when passing Company B job_id filter', async () => {
+    const res = await fetch(`${baseUrl}/api/corporate/kpis?job_id=job-beta`, {
+      headers: { Authorization: 'Bearer corp-a-token' },
+    });
+    assert.strictEqual(res.status, 403);
+    const body = await res.json();
+    assert.match(body.error, /Access denied/);
+  });
+
+  // 13. Client-supplied company_id query parameter is ignored
+  await t.test('13. Client-supplied company_id query parameter is ignored, strictly scoping to JWT company', async () => {
+    const res = await fetch(`${baseUrl}/api/corporate/kpis?company_id=comp-beta`, {
+      headers: { Authorization: 'Bearer corp-a-token' },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    // Must still return Company A metrics, never Company B
+    assert.strictEqual(body.company.id, 'comp-alpha');
+  });
+
+  // 14. Admin without assigned company is BLOCKED with 403 from corporate dashboard
+  await t.test('14. Admin without assigned company is BLOCKED with 403 from corporate dashboard', async () => {
+    const res = await fetch(`${baseUrl}/api/corporate/kpis`, {
+      headers: { Authorization: 'Bearer admin-token' },
+    });
+    assert.strictEqual(res.status, 403);
+    const body = await res.json();
+    assert.match(body.error, /Company association required/);
   });
 });

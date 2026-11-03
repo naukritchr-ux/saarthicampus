@@ -977,17 +977,33 @@ export async function getCandidates() {
   return data;
 }
 
-export async function getCorporateCandidates() {
+export async function getCorporateCandidates(filters = {}) {
   const headers = await authHeaders();
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/candidates`, { headers });
+  const params = new URLSearchParams();
+  if (filters.job_id && filters.job_id !== 'All') params.append('job_id', filters.job_id);
+  if (filters.stage && filters.stage !== 'All') params.append('stage', filters.stage);
+  const qs = params.toString();
+  const url = `${import.meta.env.VITE_BACKEND_URL}/api/corporate/candidates${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, { headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to load candidates');
   return data;
 }
 
-export async function getCorporateKpis() {
+export async function getCorporateKpis(filters = {}) {
   const headers = await authHeaders();
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/corporate/kpis`, { headers });
+  const params = new URLSearchParams();
+  if (filters.job_id && filters.job_id !== 'All') params.append('job_id', filters.job_id);
+  if (filters.stage && filters.stage !== 'All') params.append('stage', filters.stage);
+  if (filters.date_range && filters.date_range !== 'All time' && filters.date_range !== 'All') {
+    params.append('date_range', filters.date_range);
+  }
+  if (filters.start_date) params.append('start_date', filters.start_date);
+  if (filters.end_date) params.append('end_date', filters.end_date);
+
+  const qs = params.toString();
+  const url = `${import.meta.env.VITE_BACKEND_URL}/api/corporate/kpis${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, { headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to load KPIs');
   return data;
@@ -1155,19 +1171,26 @@ export async function getCandidateDependencies(candidateId) {
   const res = await fetch(`${backendUrl}/api/admin/candidates/${candidateId}/dependencies`, {
     headers,
   });
-  const contentType = res.headers.get('content-type') || '';
+  const text = await res.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
   if (!res.ok) {
-    let msg = `Server returned status ${res.status}`;
-    if (contentType.includes('application/json')) {
-      const errData = await res.json();
-      msg = errData.error || msg;
-    } else {
-      const text = await res.text();
-      if (text.includes('Cannot GET')) msg = 'Candidate dependencies endpoint not loaded in backend. Please restart backend server.';
+    let msg = data?.error || `Server returned status ${res.status}`;
+    if (!data && text.includes('Cannot GET')) {
+      msg = 'Candidate dependencies endpoint not loaded in backend. Please restart backend server.';
+    } else if (!data && text.includes('<!DOCTYPE')) {
+      msg = 'Backend server unreachable or returned an HTML error. Please verify backend is running on http://localhost:5000.';
     }
     throw new Error(msg);
   }
-  return res.json();
+  if (!data) {
+    throw new Error('Invalid response from server. Expected JSON data.');
+  }
+  return data;
 }
 
 export async function deleteCandidate(candidateId) {
@@ -1177,17 +1200,24 @@ export async function deleteCandidate(candidateId) {
     method: 'DELETE',
     headers,
   });
-  const contentType = res.headers.get('content-type') || '';
+  const text = await res.text();
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
   if (!res.ok) {
-    let msg = `Server returned status ${res.status}`;
-    if (contentType.includes('application/json')) {
-      const errData = await res.json();
-      msg = errData.error || msg;
-    } else {
-      const text = await res.text();
-      if (text.includes('Cannot DELETE')) msg = 'Candidate delete endpoint not loaded in backend. Please restart backend server.';
+    let msg = data?.error || `Server returned status ${res.status}`;
+    if (!data && text.includes('Cannot DELETE')) {
+      msg = 'Candidate delete endpoint not loaded in backend. Please restart backend server.';
+    } else if (!data && text.includes('<!DOCTYPE')) {
+      msg = 'Backend server unreachable or returned an HTML error. Please verify backend is running on http://localhost:5000.';
     }
     throw new Error(msg);
   }
-  return res.json();
+  if (!data) {
+    throw new Error('Invalid response from server. Expected JSON data.');
+  }
+  return data;
 }

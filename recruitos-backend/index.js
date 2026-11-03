@@ -3674,7 +3674,9 @@ app.post("/api/placement-coordinators/registrations/:id/reject", requireStaff, a
 // Corporate: candidates who applied to this company's jobs
 app.get("/api/corporate/candidates", requireCorporate, async (req, res) => {
   const profile = req.userProfile;
-  if (!profile.company_id) return res.json([]);
+  if (!profile || !profile.company_id) {
+    return res.status(403).json({ error: "Company association required" });
+  }
 
   const { data: jobs } = await supabase
     .from("job_profiles")
@@ -3684,47 +3686,225 @@ app.get("/api/corporate/candidates", requireCorporate, async (req, res) => {
   const jobIds = (jobs || []).map((j) => j.id);
   if (jobIds.length === 0) return res.json([]);
 
-  const { data: apps, error } = await supabase
+  const { job_id, stage } = req.query;
+  let targetJobIds = jobIds;
+  if (job_id && job_id !== "All" && job_id !== "all") {
+    if (!jobIds.includes(job_id)) {
+      return res.status(403).json({ error: "Access denied: job does not belong to your company" });
+    }
+    targetJobIds = [job_id];
+  }
+
+  let query = supabase
     .from("applications")
     .select(
       `
-      id, stage, resume_score, created_at, job_id,
-      candidates ( id, name, email, phone, colleges ( name ) ),
+      id, stage, resume_score, created_at, job_id, candidate_id,
+      candidates ( id, name, email, phone, location, experience_years, resume_url, colleges ( name, city ) ),
       job_profiles ( id, title )
     `,
     )
-    .in("job_id", jobIds);
+    .in("job_id", targetJobIds)
+    .order("created_at", { ascending: false });
+
+  if (stage && stage !== "All" && stage !== "all") {
+    query = query.eq("stage", stage);
+  }
+
+  const { data: apps, error } = await query;
 
   if (error) return res.status(500).json({ error: error.message });
 
-  const flat = apps.map((a) => ({
-    id: a.id,
-    name: a.candidates?.name || "Unknown",
-    role: a.job_profiles?.title || "Unknown",
-    match: a.resume_score ?? 0,
-    resumeScore: a.resume_score ?? 0,
-    experience: "—",
-    experienceYears: null,
-    skills: "",
-    location: a.candidates?.colleges?.name || "—",
-    stage: a.stage || "Applied",
-    source: "Application",
-    email: a.candidates?.email || "",
-    phone: a.candidates?.phone || "",
-  }));
+  const flat = (apps || []).map((a) => {
+    const cand = a.candidates;
+    let expText = null;
+    let expYrs = null;
+    if (cand?.experience_years !== null && cand?.experience_years !== undefined) {
+      expYrs = Number(cand.experience_years);
+      expText = expYrs === 0 ? "Fresher" : `${expYrs} ${expYrs === 1 ? "year" : "years"}`;
+    }
+    const locText = cand?.location || cand?.colleges?.city || (cand?.colleges?.name ? cand.colleges.name : null);
+
+    return {
+      id: a.id,
+      candidate_id: cand?.id || a.candidate_id,
+      name: cand?.name || "Unknown",
+      role: a.job_profiles?.title || "Unknown",
+      experience: expText,
+      experienceYears: expYrs,
+      location: locText,
+      stage: a.stage || "Applied",
+      source: "Application",
+      email: cand?.email || "",
+      phone: cand?.phone || "",
+      resume_url: cand?.resume_url || null,
+      created_at: a.created_at,
+    };
+  });
 
   res.json(flat);
 });
 
+// Helper: Calculate Asia/Kolkata date boundaries for filtering
+function getIstDateRangeBounds(rangeType, customStart, customEnd) {
+  if (!rangeType || rangeType === "All time" || rangeType === "All" || rangeType === "all") {
+    return null;
+  }
+
+  const now = new Date();
+  const kolkataStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const [kYear, kMonth, kDay] = kolkataStr.split("-").map(Number);
+
+  const pad = (n, len = 2) => String(n).padStart(len, "0");
+  const makeIstDate = (y, m, d, h = 0, min = 0, s = 0, ms = 0) => {
+    return new Date(`${y}-${pad(m)}-${pad(d)}T${pad(h)}:${pad(min)}:${pad(s)}.${pad(ms, 3)}+05:30`);
+  };
+
+  let startDate = null;
+  let endDate = makeIstDate(kYear, kMonth, kDay, 23, 59, 59, 999);
+
+  if (rangeType === "Today") {
+    startDate = makeIstDate(kYear, kMonth, kDay, 0, 0, 0, 0);
+  } else if (rangeType === "This week") {
+    const istDateObj = new Date(makeIstDate(kYear, kMonth, kDay, 12, 0, 0));
+    const dayOfWeek = istDateObj.getDay();
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const mondayObj = new Date(istDateObj.getTime() - diffToMonday * 86400000);
+    const monStr = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(mondayObj);
+    const [mY, mM, mD] = monStr.split("-").map(Number);
+    startDate = makeIstDate(mY, mM, mD, 0, 0, 0, 0);
+  } else if (rangeType === "This month") {
+    startDate = makeIstDate(kYear, kMonth, 1, 0, 0, 0, 0);
+  } else if (rangeType === "Last 3 months") {
+    let sMonth = kMonth - 3;
+    let sYear = kYear;
+    if (sMonth <= 0) {
+      sMonth += 12;
+      sYear -= 1;
+    }
+    startDate = makeIstDate(sYear, sMonth, 1, 0, 0, 0, 0);
+  } else if (rangeType === "This year") {
+    startDate = makeIstDate(kYear, 1, 1, 0, 0, 0, 0);
+  } else if (rangeType === "Custom range" || rangeType === "Custom") {
+    if (customStart) {
+      const [csY, csM, csD] = customStart.split("-").map(Number);
+      if (csY && csM && csD) {
+        startDate = makeIstDate(csY, csM, csD, 0, 0, 0, 0);
+      }
+    }
+    if (customEnd) {
+      const [ceY, ceM, ceD] = customEnd.split("-").map(Number);
+      if (ceY && ceM && ceD) {
+        endDate = makeIstDate(ceY, ceM, ceD, 23, 59, 59, 999);
+      }
+    }
+  }
+
+  return { startDate, endDate };
+}
+
 // Corporate: KPI summary & Hiring Analytics
 app.get("/api/corporate/kpis", requireCorporate, async (req, res) => {
   const profile = req.userProfile;
-  if (!profile.company_id) {
+  // Security: strictly scope by authenticated user's company_id. Never trust client-provided company id.
+  if (!profile || !profile.company_id) {
+    return res.status(403).json({ error: "Company association required" });
+  }
+
+  const companyId = profile.company_id;
+
+  // 1. Company identity
+  const { data: companyData } = await supabase
+    .from("companies")
+    .select("id, name, logo_url")
+    .eq("id", companyId)
+    .maybeSingle();
+
+  const companyName = companyData?.name || profile.name || "Company";
+  const companyLogo = companyData?.logo_url || null;
+
+  // 2. Job profiles belonging to this company
+  const { data: jobs, error: jobsErr } = await supabase
+    .from("job_profiles")
+    .select("id, title, location, created_at")
+    .eq("company_id", companyId);
+
+  if (jobsErr) {
+    return res.status(500).json({ error: jobsErr.message });
+  }
+
+  const allCompanyJobs = jobs || [];
+  const allJobIds = allCompanyJobs.map((j) => j.id);
+
+  // Validate job_id filter if provided
+  const { job_id, stage, date_range, start_date, end_date } = req.query;
+
+  let activeJobIds = allJobIds;
+  if (job_id && job_id !== "All" && job_id !== "all") {
+    if (!allJobIds.includes(job_id)) {
+      return res.status(403).json({ error: "Access denied: job does not belong to your company" });
+    }
+    activeJobIds = [job_id];
+  }
+
+  const dateBounds = getIstDateRangeBounds(date_range, start_date, end_date);
+
+  // Platform talent pool size (unaffected by filters)
+  const { count: poolCount } = await supabase
+    .from("candidates")
+    .select("id", { count: "exact", head: true });
+
+  const talentPoolSize = poolCount || 0;
+
+  const PIPELINE_STAGES = [
+    { stage: "Resume Review", label: "Resume review" },
+    { stage: "Aptitude", label: "Aptitude" },
+    { stage: "GD", label: "GD" },
+    { stage: "Interview", label: "Interview" },
+    { stage: "Selected", label: "Selected" },
+    { stage: "Joined", label: "Joined" },
+  ];
+
+  if (allJobIds.length === 0) {
     return res.json({
-      availableCandidates: 0,
-      matchingCandidates: 0,
-      jobProfiles: 0,
-      locations: 0,
+      company: { id: companyId, name: companyName, logo_url: companyLogo },
+      kpis: {
+        openJobPostings: 0,
+        applicationsReceived: 0,
+        interviewsScheduled: 0,
+        offersPending: 0,
+        joined: 0,
+        talentPoolSize,
+      },
+      attention: {
+        applicationsAwaitingReview: 0,
+        interviewsNeedingFeedback: 0,
+        offersAwaitingResponse: 0,
+        joiningsToConfirm: 0,
+        attentionTotal: 0,
+      },
+      pipeline: PIPELINE_STAGES.map((s) => ({
+        stage: s.stage,
+        label: s.label,
+        count: 0,
+        conversion: null,
+      })),
+      applicationsByJob: [],
+      zeroApplicationsCount: 0,
+      recommendedCandidates: [],
+      availableJobProfiles: [],
+      availableStages: PIPELINE_STAGES.map((s) => s.stage),
+      // Legacy backward compatibility fields
       jobsPosted: 0,
       activeJobs: 0,
       applications: 0,
@@ -3740,104 +3920,284 @@ app.get("/api/corporate/kpis", requireCorporate, async (req, res) => {
     });
   }
 
-  const { data: jobs } = await supabase
-    .from("job_profiles")
-    .select("id, title")
-    .eq("company_id", profile.company_id);
+  // 3. Applications for active jobs
+  const { data: rawApps, error: appsErr } = await supabase
+    .from("applications")
+    .select(`
+      id, stage, resume_score, created_at, job_id, candidate_id,
+      candidates ( id, name, email, phone, location, experience_years, resume_url, colleges ( name, city ) ),
+      job_profiles ( id, title, location )
+    `)
+    .in("job_id", activeJobIds);
 
-  const jobList = jobs || [];
-  const jobIds = jobList.map((j) => j.id);
+  if (appsErr) {
+    return res.status(500).json({ error: appsErr.message });
+  }
 
-  let applications = 0;
-  let shortlisted = 0;
-  let interviews = 0;
-  let joined = 0;
-  let matchRate = 0;
-  let matchingCandidates = 0;
-  const locationMap = {};
-  const profileMap = {};
-  const expMap = { Freshers: 0, "1-2 Years": 0, "3+ Years": 0 };
+  let appsList = rawApps || [];
 
-  jobList.forEach((j) => {
-    profileMap[j.title] = 0;
-  });
-
-  if (jobIds.length > 0) {
-    const { data: apps } = await supabase
-      .from("applications")
-      .select("id, stage, resume_score, job_id, candidates(location, experience_years, colleges(name, city)), job_profiles(title)")
-      .in("job_id", jobIds);
-
-    const appList = apps || [];
-    applications = appList.length;
-
-    let totalScore = 0;
-    let scoredCount = 0;
-
-    appList.forEach((a) => {
-      const score = Number(a.resume_score || 0);
-      if (score > 0) {
-        totalScore += score;
-        scoredCount += 1;
-      }
-      if (score >= 70) {
-        matchingCandidates += 1;
-      }
-
-      if (a.stage === "Resume Review" || a.stage === "Shortlisted") shortlisted += 1;
-      if (a.stage === "Interview") interviews += 1;
-      if (a.stage === "Joined") joined += 1;
-
-      const pTitle = a.job_profiles?.title || "Other";
-      profileMap[pTitle] = (profileMap[pTitle] || 0) + 1;
-
-      const loc = a.candidates?.location || a.candidates?.colleges?.city || a.candidates?.colleges?.name || "Other";
-      locationMap[loc] = (locationMap[loc] || 0) + 1;
-
-      const yrs = Number(a.candidates?.experience_years || 0);
-      if (yrs <= 0) expMap["Freshers"] += 1;
-      else if (yrs <= 2) expMap["1-2 Years"] += 1;
-      else expMap["3+ Years"] += 1;
+  // Apply Asia/Kolkata date boundary filter if active
+  if (dateBounds?.startDate || dateBounds?.endDate) {
+    appsList = appsList.filter((a) => {
+      if (!a.created_at) return false;
+      const t = new Date(a.created_at).getTime();
+      if (dateBounds.startDate && t < dateBounds.startDate.getTime()) return false;
+      if (dateBounds.endDate && t > dateBounds.endDate.getTime()) return false;
+      return true;
     });
+  }
 
-    if (scoredCount > 0) {
-      matchRate = Math.round(totalScore / scoredCount);
+  // Filter by stage if requested
+  let filteredApps = appsList;
+  if (stage && stage !== "All" && stage !== "all") {
+    filteredApps = appsList.filter((a) => a.stage === stage);
+  }
+
+  // 4. Interviews for active jobs
+  const { data: rawInterviews } = await supabase
+    .from("interviews")
+    .select("id, candidate_id, job_id, type, overall, recommendation, created_at")
+    .in("job_id", activeJobIds);
+
+  let interviewList = rawInterviews || [];
+  if (dateBounds?.startDate || dateBounds?.endDate) {
+    interviewList = interviewList.filter((i) => {
+      if (!i.created_at) return false;
+      const t = new Date(i.created_at).getTime();
+      if (dateBounds.startDate && t < dateBounds.startDate.getTime()) return false;
+      if (dateBounds.endDate && t > dateBounds.endDate.getTime()) return false;
+      return true;
+    });
+  }
+
+  // 5. Offers for active jobs
+  const { data: rawOffers } = await supabase
+    .from("offers")
+    .select("id, candidate_id, job_id, ctc, status, sent_on, created_at")
+    .in("job_id", activeJobIds);
+
+  let offerList = rawOffers || [];
+  if (dateBounds?.startDate || dateBounds?.endDate) {
+    offerList = offerList.filter((o) => {
+      const dt = o.sent_on || o.created_at;
+      if (!dt) return false;
+      const t = new Date(dt).getTime();
+      if (dateBounds.startDate && t < dateBounds.startDate.getTime()) return false;
+      if (dateBounds.endDate && t > dateBounds.endDate.getTime()) return false;
+      return true;
+    });
+  }
+
+  // 6. Joining records
+  const offerIds = offerList.map((o) => o.id);
+  let joiningList = [];
+  if (offerIds.length > 0) {
+    const { data: rawJoining } = await supabase
+      .from("joining")
+      .select("id, candidate_id, offer_id, joining_date, status, created_at")
+      .in("offer_id", offerIds);
+    joiningList = rawJoining || [];
+  } else {
+    const candidateIds = Array.from(new Set(appsList.map((a) => a.candidate_id).filter(Boolean)));
+    if (candidateIds.length > 0) {
+      const { data: rawJoining } = await supabase
+        .from("joining")
+        .select("id, candidate_id, offer_id, joining_date, status, created_at")
+        .in("candidate_id", candidateIds);
+      joiningList = rawJoining || [];
     }
   }
 
-  let offerCount = 0;
-  if (jobIds.length > 0) {
-    const { data: off } = await supabase
-      .from("offers")
-      .select("id")
-      .in("job_id", jobIds);
-    offerCount = off?.length || 0;
+  if (dateBounds?.startDate || dateBounds?.endDate) {
+    joiningList = joiningList.filter((j) => {
+      const dt = j.joining_date || j.created_at;
+      if (!dt) return false;
+      const t = new Date(dt).getTime();
+      if (dateBounds.startDate && t < dateBounds.startDate.getTime()) return false;
+      if (dateBounds.endDate && t > dateBounds.endDate.getTime()) return false;
+      return true;
+    });
   }
 
-  const hiringConversion = applications > 0 ? Math.round((joined / applications) * 100) : 0;
+  // KPI 1: Open Job Postings
+  const openJobPostings = activeJobIds.length;
 
-  const profilesArray = Object.entries(profileMap).map(([name, candidates]) => ({ name, candidates }));
-  const experienceArray = Object.entries(expMap).map(([name, candidates]) => ({ name, candidates }));
-  const locationsArray = Object.entries(locationMap).map(([name, count]) => ({ name, count }));
+  // KPI 2: Applications Received
+  const applicationsReceived = filteredApps.length;
+
+  // KPI 3: Interviews Scheduled (avoid double counting)
+  const interviewCandidateIds = new Set();
+  interviewList.forEach((i) => {
+    if (i.candidate_id) interviewCandidateIds.add(i.candidate_id);
+  });
+  filteredApps.forEach((a) => {
+    if (a.stage === "Interview" && a.candidate_id) {
+      interviewCandidateIds.add(a.candidate_id);
+    }
+  });
+  const interviewsScheduled = Math.max(interviewList.length, interviewCandidateIds.size);
+
+  // KPI 4: Offers Pending (sent/pending and not yet accepted or declined)
+  const offersPending = offerList.filter((o) => {
+    const st = (o.status || "").toLowerCase();
+    return st === "sent" || st === "pending" || st === "drafted";
+  }).length;
+
+  // KPI 5: Joined (verified joining records only)
+  const verifiedJoiningCandidates = new Set();
+  joiningList.forEach((j) => {
+    const st = (j.status || "").toLowerCase();
+    if (st === "verified" || st === "joined" || st === "confirmed") {
+      if (j.candidate_id) verifiedJoiningCandidates.add(j.candidate_id);
+    }
+  });
+  filteredApps.forEach((a) => {
+    if (a.stage === "Joined" && a.candidate_id) {
+      verifiedJoiningCandidates.add(a.candidate_id);
+    }
+  });
+  const joinedCount = verifiedJoiningCandidates.size;
+
+  // Needs your attention
+  const awaitingReviewCount = filteredApps.filter(
+    (a) => a.stage === "Resume Review" || a.stage === "Applied",
+  ).length;
+
+  const needingFeedbackCount = interviewList.filter(
+    (i) => i.overall === null || i.recommendation === null,
+  ).length;
+
+  const awaitingResponseCount = offerList.filter((o) => {
+    const st = (o.status || "").toLowerCase();
+    return st === "sent" || st === "pending";
+  }).length;
+
+  const toConfirmJoiningCount = joiningList.filter((j) => {
+    const st = (j.status || "").toLowerCase();
+    return st === "pending" || st === "pending confirmation";
+  }).length;
+
+  const attentionTotal =
+    awaitingReviewCount + needingFeedbackCount + awaitingResponseCount + toConfirmJoiningCount;
+
+  // Hiring pipeline: stages counts and cohort-validated conversion %
+  const stageCounts = {};
+  PIPELINE_STAGES.forEach((s) => {
+    stageCounts[s.stage] = 0;
+  });
+
+  appsList.forEach((a) => {
+    if (stageCounts[a.stage] !== undefined) {
+      stageCounts[a.stage] += 1;
+    }
+  });
+
+  const pipeline = PIPELINE_STAGES.map((s, idx) => {
+    const count = stageCounts[s.stage];
+    let conversion = null;
+    if (idx > 0) {
+      const prevStage = PIPELINE_STAGES[idx - 1].stage;
+      const prevCount = stageCounts[prevStage];
+      // Show conversion % only when earlier stage has at least 10 applications and a valid cohort
+      if (prevCount >= 10) {
+        conversion = Math.round((count / prevCount) * 100);
+      }
+    }
+    return {
+      stage: s.stage,
+      label: s.label,
+      count,
+      conversion,
+    };
+  });
+
+  // Applications by job posting
+  const jobAppMap = {};
+  allCompanyJobs.forEach((j) => {
+    jobAppMap[j.id] = { id: j.id, title: j.title, applications: 0 };
+  });
+
+  appsList.forEach((a) => {
+    if (jobAppMap[a.job_id]) {
+      jobAppMap[a.job_id].applications += 1;
+    }
+  });
+
+  const allPostingsWithApps = Object.values(jobAppMap);
+  const postingsWithApps = allPostingsWithApps
+    .filter((j) => j.applications > 0)
+    .sort((a, b) => b.applications - a.applications);
+
+  const zeroApplicationsCount = allPostingsWithApps.filter((j) => j.applications === 0).length;
+
+  // Recommended candidates (max 5 rows)
+  const recommendedCandidates = filteredApps.slice(0, 5).map((a) => {
+    const cand = a.candidates;
+    let expText = null;
+    if (cand?.experience_years !== null && cand?.experience_years !== undefined) {
+      const y = Number(cand.experience_years);
+      expText = y === 0 ? "Fresher" : `${y} ${y === 1 ? "year" : "years"}`;
+    }
+    const locText = cand?.location || cand?.colleges?.city || (cand?.colleges?.name ? cand.colleges.name : null);
+
+    return {
+      id: a.id,
+      candidate_id: cand?.id || a.candidate_id,
+      name: cand?.name || "Unknown",
+      role: a.job_profiles?.title || "Unknown",
+      experience: expText,
+      location: locText,
+      stage: a.stage || "Applied",
+      email: cand?.email || "",
+      phone: cand?.phone || "",
+      resume_url: cand?.resume_url || null,
+      created_at: a.created_at,
+    };
+  });
+
+  const availableJobProfiles = allCompanyJobs.map((j) => ({ id: j.id, title: j.title }));
 
   res.json({
-    availableCandidates: applications,
-    matchingCandidates,
-    jobProfiles: jobIds.length,
-    locations: locationsArray.length,
-    profiles: profilesArray,
-    experience: experienceArray,
-    locationsList: locationsArray,
+    company: {
+      id: companyId,
+      name: companyName,
+      logo_url: companyLogo,
+    },
+    kpis: {
+      openJobPostings,
+      applicationsReceived,
+      interviewsScheduled,
+      offersPending,
+      joined: joinedCount,
+      talentPoolSize,
+    },
+    attention: {
+      applicationsAwaitingReview: awaitingReviewCount,
+      interviewsNeedingFeedback: needingFeedbackCount,
+      offersAwaitingResponse: awaitingResponseCount,
+      joiningsToConfirm: toConfirmJoiningCount,
+      attentionTotal,
+    },
+    pipeline,
+    applicationsByJob: postingsWithApps,
+    zeroApplicationsCount,
+    recommendedCandidates,
+    availableJobProfiles,
+    availableStages: PIPELINE_STAGES.map((s) => s.stage),
 
-    jobsPosted: jobIds.length,
-    activeJobs: jobIds.length,
-    applications,
-    shortlisted,
-    interviews,
-    offers: offerCount,
-    joined,
-    matchRate,
-    hiringConversion,
+    // Backward compatibility
+    jobsPosted: allCompanyJobs.length,
+    activeJobs: allCompanyJobs.length,
+    applications: applicationsReceived,
+    shortlisted: filteredApps.filter((a) => a.stage === "Resume Review" || a.stage === "Shortlisted").length,
+    interviews: interviewsScheduled,
+    offers: offersPending,
+    joined: joinedCount,
+    matchRate: 0,
+    hiringConversion: applicationsReceived > 0 ? Math.round((joinedCount / applicationsReceived) * 100) : 0,
+    profiles: postingsWithApps.map((p) => ({ name: p.title, candidates: p.applications })),
+    experience: [],
+    locationsList: [],
   });
 });
 
@@ -4145,9 +4505,28 @@ app.delete("/api/corporate/candidates/:candidateId/save", requireCorporate, asyn
 });
 
 if (require.main === module) {
-  app.listen(5000, () =>
-    console.log("✅ RecruitOS backend running on http://localhost:5000"),
-  );
+  const PORT = process.env.PORT || 5000;
+  const server = app.listen(PORT, (err) => {
+    if (err) {
+      console.error(`❌ Failed to start RecruitOS backend on port ${PORT}:`, err);
+      process.exit(1);
+    }
+    console.log(`✅ RecruitOS backend running on http://localhost:${PORT}`);
+  });
+
+  server.on("error", (err) => {
+    console.error("❌ RecruitOS server error:", err);
+    process.exit(1);
+  });
+
+  const shutdown = () => {
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 module.exports = app;
