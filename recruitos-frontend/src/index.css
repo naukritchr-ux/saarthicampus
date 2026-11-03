@@ -1534,11 +1534,13 @@ body {
 
 /* ---- Sidebar active link gets a glow instead of flat tint ---- */
 .side-link.active {
-  background: var(--gradient-brand-2);
-  box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+  background: var(--gradient-brand-2) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 20px rgba(124, 58, 237, 0.4);
 }
 
 .side-link.active .side-icon {
+  color: #FFFFFF !important;
   filter: drop-shadow(0 0 8px rgba(236, 72, 153, 0.7));
 }
 

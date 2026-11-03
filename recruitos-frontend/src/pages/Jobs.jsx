@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Search, Building } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import * as XLSX from 'xlsx';
 import { generateJD, addJob, updateJob, deleteJob } from '../lib/api';
@@ -143,6 +144,9 @@ export default function Jobs({ user }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const fileInputRef = useRef(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('ALL');
 
   async function loadJobs(profileParam) {
     const profile = profileParam || userProfile;
@@ -556,6 +560,33 @@ export default function Jobs({ user }) {
     }
   }
 
+  const availableCompanies = useMemo(() => {
+    const set = new Set();
+    jobs.forEach((j) => {
+      if (j.company) set.add(j.company);
+    });
+    return Array.from(set).sort();
+  }, [jobs]);
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((j) => {
+      if (companyFilter !== 'ALL' && (j.company || IN_HOUSE_COMPANY) !== companyFilter) {
+        return false;
+      }
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase();
+        const titleMatch = (j.title || '').toLowerCase().includes(q);
+        const compMatch = (j.company || '').toLowerCase().includes(q);
+        const locMatch = (j.location || '').toLowerCase().includes(q);
+        const skillMatch = Array.isArray(j.skills)
+          ? j.skills.some((s) => s.toLowerCase().includes(q))
+          : (j.skills || '').toLowerCase().includes(q);
+        return titleMatch || compMatch || locMatch || skillMatch;
+      }
+      return true;
+    });
+  }, [jobs, companyFilter, searchTerm]);
+
   function cancelImport() {
     setImportRows(null);
     setImportResult(null);
@@ -572,7 +603,7 @@ export default function Jobs({ user }) {
               ? 'Loading…'
               : userProfile?.role === 'corporate'
                 ? `${jobs.length} active job profiles for ${userProfile.company_name || 'your company'}`
-                : `${jobs.length} active job descriptions across in-house and corporate`}
+                : `${filteredJobs.length === jobs.length ? jobs.length : `${filteredJobs.length} of ${jobs.length}`} active job descriptions across in-house and corporate`}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -715,13 +746,59 @@ export default function Jobs({ user }) {
         </div>
       )}
 
+      {/* Search & Company Filter Toolbar */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: '1 1 260px' }}>
+          <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input
+            className="search-box"
+            style={{ width: '100%', paddingLeft: 36 }}
+            placeholder="Search jobs by title, skills, location..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+
+        {userProfile?.role !== 'corporate' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Building size={16} style={{ color: 'var(--text-muted)' }} />
+            <select
+              className="search-box"
+              style={{ minWidth: 180 }}
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+            >
+              <option value="ALL">All Companies ({jobs.length})</option>
+              {availableCompanies.map((c) => {
+                const count = jobs.filter((j) => (j.company || IN_HOUSE_COMPANY) === c).length;
+                return (
+                  <option key={c} value={c}>{c} ({count})</option>
+                );
+              })}
+            </select>
+          </div>
+        )}
+
+        {(searchTerm || companyFilter !== 'ALL') && (
+          <button
+            className="btn-outline"
+            style={{ padding: '6px 12px', fontSize: 13 }}
+            onClick={() => { setSearchTerm(''); setCompanyFilter('ALL'); }}
+          >
+            Clear Filters
+          </button>
+        )}
+      </div>
+
       <div className="grid3">
         {loading ? (
           <div className="panel">Loading…</div>
-        ) : jobs.length === 0 ? (
-          <div className="panel">No job profiles found.</div>
+        ) : filteredJobs.length === 0 ? (
+          <div className="panel" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
+            {jobs.length === 0 ? 'No job profiles found.' : 'No job profiles match your search criteria.'}
+          </div>
         ) : (
-          jobs.map((j) => (
+          filteredJobs.map((j) => (
             <JobCard key={j.id} job={j} onEdit={startEdit} onDelete={handleDeleteJob} />
           ))
         )}

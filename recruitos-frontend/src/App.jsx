@@ -460,7 +460,13 @@ export default function App() {
               )}
             </button>
 
-            <span className="pill">Talent Corner Workspace</span>
+            <span className="pill">
+              {userRole === "admin"
+                ? "Platform Admin"
+                : userRole === "corporate"
+                ? "Corporate Workspace"
+                : "Talent Corner Workspace"}
+            </span>
             <span>{session.user.email}</span>
             <span
               className="logout-link"
@@ -468,7 +474,17 @@ export default function App() {
             >
               Log out
             </span>
-            <div className="avatar">SC</div>
+            <div className="avatar" title={session.user.email}>
+              {(() => {
+                const name =
+                  session.user.user_metadata?.full_name ||
+                  session.user.email?.split("@")[0] ||
+                  (userRole === "admin" ? "Admin" : "User");
+                const parts = name.trim().split(/[\s._-]+/);
+                if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+                return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+              })()}
+            </div>
           </div>
         </div>
         <div className="app">

@@ -9,7 +9,7 @@ export default function Interview() {
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
-    candidate_id: '', type: 'Mock', confidence: '', technical: '', communication: '', notes: '', recommendation: '',
+    candidate_id: '', job_id: '', type: 'Mock', confidence: '', technical: '', communication: '', notes: '', recommendation: '',
   });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
@@ -51,10 +51,11 @@ export default function Interview() {
     e.preventDefault();
     setFormError('');
     if (!form.candidate_id) { setFormError('Candidate is required'); return; }
+    if (!form.job_id) { setFormError('Job profile is required'); return; }
     setSaving(true);
     try {
       await addInterview(form);
-      setForm({ candidate_id: '', type: 'Mock', confidence: '', technical: '', communication: '', notes: '', recommendation: '' });
+      setForm({ candidate_id: '', job_id: '', type: 'Mock', confidence: '', technical: '', communication: '', notes: '', recommendation: '' });
       setShowForm(false);
       loadAll();
     } catch (err) {
@@ -140,6 +141,25 @@ export default function Interview() {
   ).map((g) => g.candidate).filter(Boolean);
   const mockGroups = groupByCandidate(mockInterviews, (i) => i.candidates);
   const personalGroups = groupByCandidate(personalInterviews, (i) => i.candidates);
+  const candidateAvailableJobs = useMemo(() => {
+    if (!form.candidate_id) return [];
+    const candApps = applications.filter(
+      (a) => (a.candidates?.id || a.candidate_id) === form.candidate_id
+    );
+    const seen = new Set();
+    const result = [];
+    candApps.forEach((a) => {
+      const j = a.job_profiles;
+      const jId = j?.id || a.job_id;
+      if (jId && !seen.has(jId)) {
+        seen.add(jId);
+        result.push({ id: jId, title: j?.title || 'Job Opening', company: j?.company || '' });
+      }
+    });
+    return result;
+  }, [applications, form.candidate_id]);
+
+
 
   return (
     <div className="page active" id="page-interview">
@@ -213,10 +233,32 @@ export default function Interview() {
           <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="field">
               <label>Candidate *</label>
-              <select value={form.candidate_id} onChange={(e) => setForm({ ...form, candidate_id: e.target.value })} required>
+              <select
+                value={form.candidate_id}
+                onChange={(e) => {
+                  const cId = e.target.value;
+                  const candApps = applications.filter((a) => (a.candidates?.id || a.candidate_id) === cId);
+                  const firstJobId = candApps[0]?.job_profiles?.id || candApps[0]?.job_id || '';
+                  setForm({ ...form, candidate_id: cId, job_id: firstJobId });
+                }}
+                required
+              >
                 <option value="">Select candidate…</option>
                 {interviewStageCandidates.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} {c.colleges?.name ? `— ${c.colleges.name} (In-house)` : '(Corporate)'}</option>
+                  <option key={c.id} value={c.id}>{c.name} {c.colleges?.name ? `— ${c.colleges.name}` : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Job Profile *</label>
+              <select
+                value={form.job_id}
+                onChange={(e) => setForm({ ...form, job_id: e.target.value })}
+                required
+              >
+                <option value="">Select job profile…</option>
+                {candidateAvailableJobs.map((j) => (
+                  <option key={j.id} value={j.id}>{j.title} {j.company ? `(${j.company})` : ''}</option>
                 ))}
               </select>
             </div>

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { getOffers, getCandidates, getJobs, addOffer } from '../lib/api';
+import { useEffect, useState, useMemo } from 'react';
+import { getOffers, getCandidates, getJobs, addOffer, getAllApplications } from '../lib/api';
 
 const STATUS_BADGE = {
   Drafted: 'gray',
@@ -12,6 +12,7 @@ export default function Offers() {
   const [offers, setOffers] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -22,39 +23,52 @@ export default function Offers() {
 
   function loadAll() {
     setLoading(true);
-    Promise.all([getOffers(), getCandidates(), getJobs()])
-      .then(([o, c, j]) => {
+    Promise.all([getOffers(), getCandidates(), getJobs(), getAllApplications()])
+      .then(([o, c, j, a]) => {
         setOffers(o);
         setCandidates(c);
         setJobs(j);
+        setApplications(a || []);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-  let ignore = false;
+    let ignore = false;
 
-  async function init() {
-    setLoading(true);
-    try {
-      const [o, c, j] = await Promise.all([getOffers(), getCandidates(), getJobs()]);
-      if (!ignore) {
-        setOffers(o);
-        setCandidates(c);
-        setJobs(j);
-        setError('');
+    async function init() {
+      setLoading(true);
+      try {
+        const [o, c, j, a] = await Promise.all([getOffers(), getCandidates(), getJobs(), getAllApplications()]);
+        if (!ignore) {
+          setOffers(o);
+          setCandidates(c);
+          setJobs(j);
+          setApplications(a || []);
+          setError('');
+        }
+      } catch (err) {
+        if (!ignore) setError(err.message);
+      } finally {
+        if (!ignore) setLoading(false);
       }
-    } catch (err) {
-      if (!ignore) setError(err.message);
-    } finally {
-      if (!ignore) setLoading(false);
     }
-  }
 
-  init();
-  return () => { ignore = true; };
-}, []);
+    init();
+    return () => { ignore = true; };
+  }, []);
+
+  const candidateOptions = useMemo(() => {
+    if (form.job_id) {
+      const appCands = applications
+        .filter((a) => (a.job_profiles?.id || a.job_id) === form.job_id)
+        .map((a) => a.candidates)
+        .filter(Boolean);
+      if (appCands.length > 0) return appCands;
+    }
+    return candidates;
+  }, [form.job_id, applications, candidates]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -90,7 +104,7 @@ export default function Offers() {
               <label>Candidate *</label>
               <select value={form.candidate_id} onChange={(e) => setForm({ ...form, candidate_id: e.target.value })} required>
                 <option value="">Select candidate…</option>
-                {candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {candidateOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="field">

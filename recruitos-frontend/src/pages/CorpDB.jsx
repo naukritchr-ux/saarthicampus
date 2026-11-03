@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as XLSX from "xlsx";
 import { sanitizePhone } from "../lib/phone";
@@ -37,6 +37,33 @@ export default function CorpDB() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+
+  const activeCompaniesCount = useMemo(
+    () => companies.filter((c) => (c.hiring_status || "").toLowerCase() === "active").length,
+    [companies]
+  );
+
+  const filteredCompanies = useMemo(() => {
+    return companies.filter((c) => {
+      const q = search.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        (c.name ?? "").toLowerCase().includes(q) ||
+        (c.sector ?? "").toLowerCase().includes(q) ||
+        (c.industry ?? "").toLowerCase().includes(q) ||
+        (c.sub_industry ?? "").toLowerCase().includes(q) ||
+        (c.city ?? "").toLowerCase().includes(q) ||
+        (c.hq_location ?? "").toLowerCase().includes(q) ||
+        (c.hr_name ?? "").toLowerCase().includes(q) ||
+        (c.hr_email ?? "").toLowerCase().includes(q);
+      const matchStatus =
+        statusFilter === "All" ||
+        (c.hiring_status || "").toLowerCase() === statusFilter.toLowerCase();
+      return matchSearch && matchStatus;
+    });
+  }, [companies, search, statusFilter]);
 
   // HR inside company popup
   const [showHrForm, setShowHrForm] = useState(false);
@@ -504,7 +531,7 @@ export default function CorpDB() {
           <p>
             {loading
               ? "Loading…"
-              : `${companies.length} active client companies`}
+              : `${activeCompaniesCount} hiring active · ${companies.length} total client companies`}
           </p>
         </div>
 
@@ -1087,7 +1114,7 @@ export default function CorpDB() {
           >
             Loading…
           </div>
-        ) : companies.length === 0 ? (
+        ) : filteredCompanies.length === 0 ? (
           <div
             style={{
               padding: 30,
@@ -1095,7 +1122,7 @@ export default function CorpDB() {
               color: "var(--text-muted)",
             }}
           >
-            No companies found.
+            {companies.length === 0 ? "No companies found." : "No companies match the selected search or filter."}
           </div>
         ) : (
           <div
@@ -1129,7 +1156,7 @@ export default function CorpDB() {
               </thead>
 
               <tbody>
-                {companies.map((c) => (
+                {filteredCompanies.map((c) => (
                   <tr key={c.id}>
                     <td>
                       <strong>{c.name}</strong>

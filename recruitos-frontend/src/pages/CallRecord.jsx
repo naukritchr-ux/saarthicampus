@@ -4,6 +4,8 @@ import { getCallRecords, addCallRecord, updateCallRecord, deleteCallRecord } fro
 
 export default function CallRecord() {
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [showModal, setShowModal] = useState(false);
   const [callRecords, setCallRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -118,6 +120,8 @@ export default function CallRecord() {
   }
 
   const filtered = callRecords.filter((c) => {
+    if (typeFilter !== "ALL" && c.entity_type !== typeFilter) return false;
+    if (statusFilter !== "ALL" && c.status !== statusFilter) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return [c.contact_name, c.organization, c.phone, c.entity_type, c.notes]
@@ -344,13 +348,13 @@ export default function CallRecord() {
       </div>
 
       {/* Search + Filter toolbar */}
-      <div className="toolbar">
-        <div className="search-box" style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1 }}>
+      <div className="toolbar" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="search-box" style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1 1 240px" }}>
           <Search size={16} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search calls..."
+            placeholder="Search calls by contact, org, phone..."
             style={{
               border: "none",
               outline: "none",
@@ -363,10 +367,43 @@ export default function CallRecord() {
           />
         </div>
 
-        <button className="btn-outline">
-          <Filter size={16} />
-          Filters
-        </button>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="search-box"
+          style={{ minWidth: 140, cursor: "pointer" }}
+        >
+          <option value="ALL">All Types</option>
+          <option value="College">College</option>
+          <option value="Corporate">Corporate</option>
+          <option value="Candidate">Candidate</option>
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="search-box"
+          style={{ minWidth: 150, cursor: "pointer" }}
+        >
+          <option value="ALL">All Statuses</option>
+          <option value="Completed">Completed</option>
+          <option value="Follow Up">Follow Up</option>
+          <option value="Cancelled">Cancelled</option>
+        </select>
+
+        {(search || typeFilter !== "ALL" || statusFilter !== "ALL") && (
+          <button
+            className="btn-outline"
+            style={{ padding: "6px 12px", fontSize: "13px" }}
+            onClick={() => {
+              setSearch("");
+              setTypeFilter("ALL");
+              setStatusFilter("ALL");
+            }}
+          >
+            Clear Filters
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -393,7 +430,7 @@ export default function CallRecord() {
                   <td colSpan={9} style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
                     {callRecords.length === 0
                       ? "No call records yet. Click \"Add Call Record\" to log one."
-                      : `No calls match "${search}".`}
+                      : "No call records match your search or filter criteria."}
                   </td>
                 </tr>
               ) : (

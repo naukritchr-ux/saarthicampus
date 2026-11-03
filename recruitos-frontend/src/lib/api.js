@@ -352,44 +352,31 @@ export async function addGdRating({ candidate_id, confidence, communication, lea
 
 // ---------- Interviews ----------
 export async function getInterviews() {
-  const { data, error } = await supabase
-    .from('interviews')
-    .select('*, candidates ( name, college_id, colleges ( name ) ), job_profiles ( title, company )')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/interviews`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load interviews');
   return data;
 }
 
-export async function addInterview({ candidate_id, type, confidence, technical, communication, notes, recommendation }) {
-  let overall = null;
-  if (type === 'Mock') {
-    const vals = [confidence, technical, communication].map(Number);
-    overall = Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1));
-  }
-  const { data, error } = await supabase
-    .from('interviews')
-    .insert([{
-      candidate_id,
-      type,
-      confidence: type === 'Mock' ? Number(confidence) : null,
-      technical: type === 'Mock' ? Number(technical) : null,
-      communication: type === 'Mock' ? Number(communication) : null,
-      overall,
-      notes: notes || null,
-      recommendation: recommendation || null,
-    }])
-    .select()
-    .single();
-  if (error) throw error;
+export async function addInterview({ candidate_id, job_id, type, confidence, technical, communication, notes, recommendation }) {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/interviews`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ candidate_id, job_id, type, confidence, technical, communication, notes, recommendation }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to add interview');
   return data;
 }
 
 // ---------- Offers ----------
 export async function getOffers() {
-  const { data, error } = await supabase
-    .from('offers')
-    .select('*, candidates ( name ), job_profiles ( title, company )');
-  if (error) throw error;
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/offers`, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load offers');
   return data;
 }
 
@@ -412,16 +399,32 @@ export async function getCandidatesByStage(stage) {
 }
 
 export async function addOffer({ candidate_id, job_id, ctc, status, sent_on }) {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/offers`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ candidate_id, job_id, ctc, status, sent_on }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to create offer');
+  return data;
+}
+
+// ---------- Joining Tracker ----------
+export async function updateJoiningRecord(id, { status, joining_date }) {
+  const payload = {};
+  if (status !== undefined) payload.status = status;
+  if (joining_date !== undefined) payload.joining_date = joining_date || null;
   const { data, error } = await supabase
-    .from('offers')
-    .insert([{ candidate_id, job_id, ctc, status, sent_on: sent_on || null }])
+    .from('joining')
+    .update(payload)
+    .eq('id', id)
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-// ---------- Joining Tracker ----------
 export async function getJoiningStatus() {
   const { data, error } = await supabase
     .from('joining')
@@ -511,11 +514,15 @@ export async function getAllApplications() {
 }
 
 export async function updateApplicationStage(applicationId, stage) {
-  const { error } = await supabase
-    .from('applications')
-    .update({ stage })
-    .eq('id', applicationId);
-  if (error) throw error;
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/applications/${applicationId}/stage`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ stage }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update application stage');
+  return data;
 }
 
 // ---------- Upcoming Drives ----------
@@ -737,29 +744,62 @@ export async function updateApplicationDocument(applicationId, docKey, fileUrl) 
 export async function createCandidate({
   name, email, phone, college_id, college_other, resume_url, photo_url,
   degree, branch, cgpa, passing_year, active_backlogs, tenth_percentage, twelfth_percentage,
-  skills, linkedin_url, github_url,   // ⭐ NEW
+  skills, linkedin_url, github_url,
 }) {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const skillsArray = Array.isArray(skills)
+    ? skills
+    : (skills ? skills.split(',').map((s) => s.trim()).filter(Boolean) : []);
+
   const payload = {
-    name, phone,
+    name: name?.trim(),
+    email: email?.trim(),
+    phone: phone ? String(phone).replace(/\D/g, '') : '',
     college_id: college_id || null,
-    college_other: college_other || null,
-    resume_url, photo_url,
+    college_other: college_other ? college_other.trim() : null,
+    resume_url,
+    photo_url: photo_url || null,
     degree: degree || null,
-    branch: branch || null,
-    cgpa: cgpa ? Number(cgpa) : null,
-    passing_year: passing_year ? Number(passing_year) : null,
+    branch: branch ? branch.trim() : null,
+    cgpa: cgpa !== '' && cgpa !== null && cgpa !== undefined ? Number(cgpa) : null,
+    passing_year: passing_year !== '' && passing_year !== null && passing_year !== undefined ? Number(passing_year) : null,
     active_backlogs: !!active_backlogs,
-    tenth_percentage: tenth_percentage ? Number(tenth_percentage) : null,
-    twelfth_percentage: twelfth_percentage ? Number(twelfth_percentage) : null,
-    skills: skills && skills.length ? skills : null,        // ⭐ NEW
-    linkedin_url: linkedin_url || null,                      // ⭐ NEW
-    github_url: github_url || null,                          // ⭐ NEW
+    tenth_percentage: tenth_percentage !== '' && tenth_percentage !== null && tenth_percentage !== undefined ? Number(tenth_percentage) : null,
+    twelfth_percentage: twelfth_percentage !== '' && twelfth_percentage !== null && twelfth_percentage !== undefined ? Number(twelfth_percentage) : null,
+    skills: skillsArray,
+    linkedin_url: linkedin_url || null,
+    github_url: github_url || null,
   };
+
+  try {
+    const res = await fetch(`${backendUrl}/api/candidates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save candidate profile');
+      }
+      return data.candidate;
+    } else {
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
+    }
+  } catch (backendErr) {
+    if (backendErr.message && !backendErr.message.includes('Failed to fetch') && !backendErr.message.includes('NetworkError')) {
+      throw backendErr;
+    }
+    console.warn('Backend server unreachable, falling back to direct Supabase client:', backendErr);
+  }
 
   const { data: existing, error: lookupError } = await supabase
     .from('candidates')
     .select('id')
-    .eq('email', email)
+    .eq('email', payload.email)
     .maybeSingle();
   if (lookupError) throw lookupError;
 
@@ -776,7 +816,7 @@ export async function createCandidate({
 
   const { data, error } = await supabase
     .from('candidates')
-    .insert([{ ...payload, email }])
+    .insert([payload])
     .select()
     .single();
   if (error) throw error;
@@ -1067,4 +1107,87 @@ export function computeMatchScore(candidateSkills, jobSkills) {
   if (jobList.length === 0) return null;
   const matched = jobList.filter((s) => candSet.has(s));
   return Math.round((matched.length / jobList.length) * 100);
+}
+export async function selectCandidate(applicationId, ctc) {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/candidate/select`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ applicationId, ctc }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to select candidate');
+  return data;
+}
+
+export async function rejectCandidate(applicationId) {
+  const headers = await authHeaders();
+  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/candidate/reject`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ applicationId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reject candidate');
+  return data;
+}
+
+export async function getAdminDashboardData(params = {}) {
+  const headers = await authHeaders();
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') {
+      searchParams.append(k, v);
+    }
+  });
+  const qs = searchParams.toString();
+  const url = `${import.meta.env.VITE_BACKEND_URL}/api/admin/dashboard${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, { headers });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load admin dashboard data');
+  return data;
+}
+
+// ---------- Admin Candidate Management ----------
+export async function getCandidateDependencies(candidateId) {
+  const headers = await authHeaders();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/admin/candidates/${candidateId}/dependencies`, {
+    headers,
+  });
+  const contentType = res.headers.get('content-type') || '';
+  if (!res.ok) {
+    let msg = `Server returned status ${res.status}`;
+    if (contentType.includes('application/json')) {
+      const errData = await res.json();
+      msg = errData.error || msg;
+    } else {
+      const text = await res.text();
+      if (text.includes('Cannot GET')) msg = 'Candidate dependencies endpoint not loaded in backend. Please restart backend server.';
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export async function deleteCandidate(candidateId) {
+  const headers = await authHeaders();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/admin/candidates/${candidateId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  const contentType = res.headers.get('content-type') || '';
+  if (!res.ok) {
+    let msg = `Server returned status ${res.status}`;
+    if (contentType.includes('application/json')) {
+      const errData = await res.json();
+      msg = errData.error || msg;
+    } else {
+      const text = await res.text();
+      if (text.includes('Cannot DELETE')) msg = 'Candidate delete endpoint not loaded in backend. Please restart backend server.';
+    }
+    throw new Error(msg);
+  }
+  return res.json();
 }

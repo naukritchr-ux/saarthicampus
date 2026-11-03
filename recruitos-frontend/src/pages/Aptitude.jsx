@@ -42,9 +42,9 @@ export default function Aptitude() {
     setLoading(true);
     try {
       const [r, c, j] = await Promise.all([getAptitudeResults(), getCandidatesByStage('Aptitude'), getJobs()]);
-      setResults(r);
-      setCandidates(c);
-      setJobs(j);
+      setResults(r || []);
+      setCandidates(c || []);
+      setJobs(j || []);
       setError('');
     } catch (err) {
       setError(err.message || 'Failed to load data');
@@ -61,9 +61,9 @@ export default function Aptitude() {
       try {
         const [r, c, j] = await Promise.all([getAptitudeResults(), getCandidatesByStage('Aptitude'), getJobs()]);
         if (!ignore) {
-          setResults(r);
-          setCandidates(c);
-          setJobs(j);
+          setResults(r || []);
+          setCandidates(c || []);
+          setJobs(j || []);
           setError('');
         }
       } catch (err) {
@@ -100,34 +100,20 @@ export default function Aptitude() {
   async function handleGenerate(e) {
     e.preventDefault();
     setGenError('');
-    setGeneratedTest(null);
     setGenerating(true);
     try {
-      const test = await generateAptitudeTest({
+      const data = await generateAptitudeTest({
         job_id: genJobId || null,
         difficulty: genDifficulty,
         question_count: genQCount,
       });
-      setGeneratedTest(test);
-      if (genJobId) {
-        setForm((f) => ({ ...f, job_id: genJobId, total: String(test.total) }));
-      }
+      setGeneratedTest(data);
+      setForm((f) => ({ ...f, total: String(data.total || genQCount) }));
     } catch (err) {
       setGenError(err.message);
     } finally {
       setGenerating(false);
     }
-  }
-
-  // ---- Manual question editing ----
-
-  function updateQuestions(updater) {
-    setGeneratedTest((prev) => {
-      if (!prev) return prev;
-      const questions = updater(prev.questions);
-      return { ...prev, questions, total: questions.length };
-    });
-    setForm((f) => ({ ...f, total: String(updater([...(generatedTest?.questions || [])]).length) }));
   }
 
   function updateQuestionField(index, field, value) {
@@ -138,15 +124,15 @@ export default function Aptitude() {
     });
   }
 
-  function updateOption(index, optIndex, value) {
+  function updateQuestionOption(index, optionIndex, value) {
     setGeneratedTest((prev) => {
       if (!prev) return prev;
       const questions = prev.questions.map((q, i) => {
         if (i !== index) return q;
-        const oldValue = q.options[optIndex];
-        const options = q.options.map((o, oi) => (oi === optIndex ? value : o));
-        // If the edited option was the correct answer, keep the answer in sync
-        const answer = q.answer === oldValue ? value : q.answer;
+        const options = [...q.options];
+        const oldVal = options[optionIndex];
+        options[optionIndex] = value;
+        const answer = q.answer === oldVal ? value : q.answer;
         return { ...q, options, answer };
       });
       return { ...prev, questions };
@@ -185,7 +171,6 @@ export default function Aptitude() {
     setSendError('');
     setSendSuccess('');
 
-    // Validate every question has text, 4 non-empty options, and a correct answer that matches one of them
     const invalidIndex = generatedTest.questions.findIndex((q) => {
       const filledOptions = q.options.filter((o) => o.trim() !== '');
       return !q.q.trim() || filledOptions.length < 2 || !q.options.includes(q.answer) || !q.answer;
@@ -215,10 +200,13 @@ export default function Aptitude() {
   const attempted = results.length;
   const passed = results.filter((r) => r.passed).length;
   const passRate = attempted ? Math.round((passed / attempted) * 100) : 0;
-  const avgScore = attempted
-    ? (results.reduce((sum, r) => sum + r.score, 0) / attempted).toFixed(1)
-    : '0';
-  const avgTotal = attempted ? results[0].total : 0;
+  
+  // Calculate average score accurately across tests with different maximum marks
+  const totalScore = results.reduce((sum, r) => sum + Number(r.score || 0), 0);
+  const totalPossible = results.reduce((sum, r) => sum + Number(r.total || 0), 0);
+  const avgPercentage = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+  const avgObtained = attempted ? (totalScore / attempted).toFixed(1) : '0';
+  const avgTotal = attempted ? (totalPossible / attempted).toFixed(0) : '0';
 
   return (
     <div className="page active" id="page-aptitude">
@@ -254,28 +242,25 @@ export default function Aptitude() {
             <div className="field">
               <label>Difficulty</label>
               <select value={genDifficulty} onChange={(e) => setGenDifficulty(e.target.value)}>
-                <option value="auto">Auto (match job level)</option>
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
+                <option value="auto">Auto (match job requirements)</option>
+                <option value="easy">Easy (fresher / foundational)</option>
+                <option value="medium">Medium (standard campus test)</option>
+                <option value="hard">Hard (specialized / competitive)</option>
               </select>
             </div>
             <div className="field">
-              <label># Questions</label>
-              <input type="number" min={5} max={50} value={genQCount} onChange={(e) => setGenQCount(Number(e.target.value))} />
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              {genError && <p style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{genError}</p>}
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn-primary" type="submit" disabled={generating}>
+              <label>Number of Questions</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="number"
+                  min="5"
+                  max="50"
+                  value={genQCount}
+                  onChange={(e) => setGenQCount(e.target.value)}
+                  style={{ width: 80 }}
+                />
+                <button className="btn-primary" type="submit" disabled={generating} style={{ flex: 1 }}>
                   {generating ? 'Generating…' : 'Generate Test'}
-                </button>
-                <button
-                  className="btn-outline"
-                  type="button"
-                  onClick={addManualQuestion}
-                >
-                  + Start Blank / Add Question Manually
                 </button>
               </div>
             </div>
@@ -333,40 +318,28 @@ export default function Aptitude() {
                         type="button"
                         onClick={() => deleteQuestion(i)}
                         title="Remove question"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 16, padding: 4, flexShrink: 0 }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 16, padding: 4 }}
                       >
                         ✕
                       </button>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginLeft: 24 }}>
-                      {q.options.map((opt, oi) => (
-                        <div key={oi} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {q.options.map((opt, optIndex) => (
+                        <div key={optIndex} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <input
                             type="radio"
                             name={`correct-${i}`}
-                            checked={opt !== '' && opt === q.answer}
+                            checked={q.answer === opt && opt !== ''}
                             onChange={() => setCorrectAnswer(i, opt)}
                             title="Mark as correct answer"
-                            style={{ flexShrink: 0, cursor: 'pointer' }}
                           />
-                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flexShrink: 0 }}>
-                            {String.fromCharCode(65 + oi)}.
-                          </span>
                           <input
                             type="text"
                             value={opt}
-                            onChange={(e) => updateOption(i, oi, e.target.value)}
-                            placeholder={`Option ${String.fromCharCode(65 + oi)}`}
-                            style={{
-                              flex: 1,
-                              fontSize: 12.5,
-                              padding: '6px 8px',
-                              borderRadius: 6,
-                              border: '1px solid var(--border-default)',
-                              fontWeight: opt !== '' && opt === q.answer ? 700 : 400,
-                              color: opt !== '' && opt === q.answer ? 'var(--success)' : 'inherit',
-                            }}
+                            onChange={(e) => updateQuestionOption(i, optIndex, e.target.value)}
+                            placeholder={`Option ${String.fromCharCode(65 + optIndex)}`}
+                            style={{ flex: 1, fontSize: 12.5, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border-default)' }}
                           />
                         </div>
                       ))}
@@ -419,7 +392,7 @@ export default function Aptitude() {
             <div className="field">
               <label>Job Profile</label>
               <select value={form.job_id} onChange={(e) => setForm({ ...form, job_id: e.target.value })}>
-                <option value="">Optional…</option>
+                <option value="">General / not linked to job</option>
                 {jobs.map((j) => <option key={j.id} value={j.id}>{j.company} — {j.title}</option>)}
               </select>
             </div>
@@ -428,14 +401,12 @@ export default function Aptitude() {
               <input type="number" value={form.score} onChange={(e) => setForm({ ...form, score: e.target.value })} required />
             </div>
             <div className="field">
-              <label>Total *</label>
+              <label>Total Marks *</label>
               <input type="number" value={form.total} onChange={(e) => setForm({ ...form, total: e.target.value })} required />
             </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              {formError && <p style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{formError}</p>}
-              <button className="btn-primary" type="submit" disabled={saving}>
-                {saving ? 'Saving…' : 'Save Result'}
-              </button>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10 }}>
+              <button className="btn-gold" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save Result'}</button>
+              <button className="btn-outline" type="button" onClick={() => setShowForm(false)}>Cancel</button>
             </div>
           </form>
         </div>
@@ -471,7 +442,7 @@ export default function Aptitude() {
           <div className="panel-title">Test Summary</div>
           <div className="resume-row" style={{ paddingTop: 0 }}><div className="resume-info"><div className="name">Attempted</div></div><strong>{attempted}</strong></div>
           <div className="resume-row"><div className="resume-info"><div className="name">Pass Rate</div></div><strong>{passRate}%</strong></div>
-          <div className="resume-row"><div className="resume-info"><div className="name">Avg. Score</div></div><strong>{avgScore} / {avgTotal}</strong></div>
+          <div className="resume-row"><div className="resume-info"><div className="name">Avg. Score</div></div><strong>{avgObtained} / {avgTotal} ({avgPercentage}%)</strong></div>
         </div>
       </div>
     </div>

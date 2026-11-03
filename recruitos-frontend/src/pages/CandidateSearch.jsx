@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   searchCandidates,
   saveCandidate,
   unsaveCandidate,
   openSecureDocument,
+  getJobs,
+  computeMatchScore,
 } from "../lib/api";
 
 const emptyFilters = {
@@ -25,6 +27,8 @@ export default function CandidateSearch() {
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [savingId, setSavingId] = useState(null);
   const [minMatch, setMinMatch] = useState("All");
+  const [jobs, setJobs] = useState([]);
+  const [selectedJobId, setSelectedJobId] = useState("");
 
   async function runSearch(activeFilters = filters) {
     setLoading(true);
@@ -41,6 +45,9 @@ export default function CandidateSearch() {
 
   useEffect(() => {
     runSearch(emptyFilters);
+    getJobs()
+      .then((data) => setJobs(data || []))
+      .catch((err) => console.warn("Could not load jobs for match scoring:", err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -56,6 +63,7 @@ export default function CandidateSearch() {
   function resetFilters() {
     setFilters(emptyFilters);
     setMinMatch("All");
+    setSelectedJobId("");
     runSearch(emptyFilters);
   }
 
@@ -82,11 +90,27 @@ export default function CandidateSearch() {
     setSavingId(null);
   }
 
-  const displayedCandidates = candidates.filter((c) => {
-    if (minMatch === "All") return true;
-    const threshold = Number(minMatch);
-    return (c.match ?? 0) >= threshold;
-  });
+  const targetJob = useMemo(() => {
+    return jobs.find((j) => j.id === selectedJobId) || null;
+  }, [jobs, selectedJobId]);
+
+  const candidatesWithMatch = useMemo(() => {
+    return candidates.map((c) => {
+      let match = null;
+      if (targetJob && targetJob.skills) {
+        match = computeMatchScore(c.skills, targetJob.skills);
+      }
+      return { ...c, match };
+    });
+  }, [candidates, targetJob]);
+
+  const displayedCandidates = useMemo(() => {
+    return candidatesWithMatch.filter((c) => {
+      if (minMatch === "All" || !targetJob) return true;
+      const threshold = Number(minMatch);
+      return (c.match ?? 0) >= threshold;
+    });
+  }, [candidatesWithMatch, minMatch, targetJob]);
 
   return (
     <div className="page active" id="page-candidate-search">
@@ -164,13 +188,32 @@ export default function CandidateSearch() {
 
           <select
             className="search-box"
+            value={selectedJobId}
+            onChange={(e) => {
+              setSelectedJobId(e.target.value);
+              if (!e.target.value) setMinMatch("All");
+            }}
+          >
+            <option value="">— Compare against Job Profile —</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>
+                🎯 Match: {j.title} {j.company ? `(${j.company})` : ''}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="search-box"
             value={minMatch}
             onChange={(e) => setMinMatch(e.target.value)}
+            disabled={!targetJob}
+            title={!targetJob ? "Select a job profile first to filter by genuine skill match score" : ""}
           >
-            <option value="All">All Match Scores</option>
-            <option value="90">90%+</option>
-            <option value="80">80%+</option>
-            <option value="70">70%+</option>
+            <option value="All">{targetJob ? "All Match Scores" : "Match Score (Select Job First)"}</option>
+            <option value="90">90%+ Match</option>
+            <option value="80">80%+ Match</option>
+            <option value="70">70%+ Match</option>
+            <option value="50">50%+ Match</option>
           </select>
         </div>
 
@@ -251,10 +294,12 @@ export default function CandidateSearch() {
                     </td>
                     <td>
                       {c.match != null ? (
-                        <span className="match-score">{c.match}%</span>
+                        <span className="match-score" style={{ fontWeight: 700, color: c.match >= 70 ? 'var(--success, #16a34a)' : 'inherit' }}>
+                          {c.match}%
+                        </span>
                       ) : (
                         <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                          Not Applied
+                          {targetJob ? "0%" : "—"}
                         </span>
                       )}
                     </td>

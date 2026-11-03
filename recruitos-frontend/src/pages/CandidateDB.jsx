@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 import * as XLSX from "xlsx";
-import { getCandidates, uploadPhoto, uploadResume, openSecureDocument } from "../lib/api";
+import { getCandidates, uploadPhoto, uploadResume, openSecureDocument, deleteCandidate, getCandidateDependencies } from "../lib/api";
 import { sanitizePhone } from "../lib/phone";
 import { isValidEmail } from "../lib/email";
 import AIImport from "../components/AIImport";
@@ -186,14 +186,38 @@ export default function CandidateDB() {
   // --------------------------------------------------
 
   async function handleDeleteCandidate(id, name) {
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    try {
+      let confirmMsg = `Delete "${name}"?\n\nThis will permanently delete this candidate profile. This cannot be undone.`;
+      try {
+        const depData = await getCandidateDependencies(id);
+        if (depData?.dependencies) {
+          const parts = [];
+          if (depData.dependencies.applications > 0) parts.push(`${depData.dependencies.applications} job application(s)`);
+          if (depData.dependencies.interviews > 0) parts.push(`${depData.dependencies.interviews} interview record(s)`);
+          if (depData.dependencies.gd_sessions > 0) parts.push(`${depData.dependencies.gd_sessions} GD session(s)`);
+          if (depData.dependencies.offers > 0) parts.push(`${depData.dependencies.offers} offer letter(s)`);
+          if (depData.dependencies.joining > 0) parts.push(`${depData.dependencies.joining} joining record(s)`);
+          if (depData.dependencies.aptitude_results > 0) parts.push(`${depData.dependencies.aptitude_results} aptitude test result(s)`);
 
-    const { error } = await supabase.from("candidates").delete().eq("id", id);
-    if (error) {
-      console.error("Failed to delete candidate:", error);
-      alert("Could not delete candidate. Check console for details.");
-    } else {
+          if (parts.length > 0) {
+            confirmMsg = `Delete "${name}"?\n\nThis candidate has active recruitment activity:\n• ${parts.join("\n• ")}\n\nDeleting will permanently remove the candidate and cascade-delete all of the above records. This cannot be undone.`;
+          }
+        }
+      } catch (depErr) {
+        console.warn("Could not preview candidate dependencies:", depErr);
+      }
+
+      if (!window.confirm(confirmMsg)) return;
+
+      setLoading(true);
+      const res = await deleteCandidate(id);
+      alert(res.message || `Candidate "${name}" deleted successfully.`);
       await loadCandidates();
+    } catch (err) {
+      console.error("Failed to delete candidate:", err);
+      alert("Could not delete candidate: " + (err.message || "Unknown error"));
+    } finally {
+      setLoading(false);
     }
   }
 

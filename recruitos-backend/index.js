@@ -21,6 +21,7 @@ const { createGDRoom, createMeetingToken } = require("./dailyService");
 const jdRoutes = require("./jdRoutes");
 const { moveApplicationStage } = require("./pipelineSync");
 const { parseStorageUrl, matchesStorageObject } = require("./storageHelpers");
+const { validateCandidatePayload } = require("./candidateValidation");
 const multer = require("multer");
 const XLSX = require("xlsx");
 // NOTE: pdf-parse is now lazy-loaded (required inside the routes that need it)
@@ -57,6 +58,136 @@ const {
   requireCorporate,
   requireAdminOrCorporate,
 } = createAuthMiddleware(supabase);
+
+// ---- ADMIN DASHBOARD (Consolidated, Staff/Admin only) ----
+const ALLOWED_ADMIN_SORT_FIELDS = new Set([
+  "applications",
+  "interviews",
+  "created_at",
+  "title",
+  "company",
+  "name",
+  "registered",
+  "selected",
+  "joined",
+]);
+const ALLOWED_ADMIN_ORDERS = new Set(["asc", "desc"]);
+app.get("/api/admin/dashboard", requireStaff, async (req, res) => {
+  const { sort, order } = req.query;
+  if (sort && !ALLOWED_ADMIN_SORT_FIELDS.has(String(sort).toLowerCase())) {
+    return res.status(400).json({ error: "Invalid sort field: " + sort });
+  }
+  if (order && !ALLOWED_ADMIN_ORDERS.has(String(order).toLowerCase())) {
+    return res.status(400).json({ error: "Invalid sort order: " + order });
+  }
+  try {
+    const results = await Promise.allSettled([
+      supabase
+        .from("candidates")
+        .select(`
+          id, name, email, phone, college_id, college_other, degree, branch,
+          cgpa, passing_year, active_backlogs, tenth_percentage, twelfth_percentage,
+          skills, location, experience_years, resume_url, created_at,
+          colleges ( id, name, city )
+        `)
+        .order("created_at", { ascending: false }),
+
+      supabase
+        .from("job_profiles")
+        .select(`
+          id, title, company, company_id, location, salary_range,
+          experience, skills, qualification, employment_type, created_at
+        `)
+        .order("created_at", { ascending: false }),
+
+      supabase
+        .from("companies")
+        .select(`
+          id, name, sector, hiring_status, verification_status, city,
+          industry, created_at
+        `)
+        .order("name", { ascending: true }),
+
+      supabase
+        .from("colleges")
+        .select("id, name, city, course, status, created_at")
+        .order("name", { ascending: true }),
+
+      supabase
+        .from("applications")
+        .select(`
+          id, candidate_id, job_id, stage, resume_score, created_at,
+          job_profiles ( id, title, company, company_id ),
+          candidates ( id, name, college_id, college_other, colleges ( id, name ) )
+        `)
+        .order("created_at", { ascending: false }),
+
+      supabase
+        .from("offers")
+        .select(`
+          id, candidate_id, job_id, ctc, status, sent_on, created_at,
+          job_profiles ( id, title, company, company_id )
+        `),
+
+      supabase
+        .from("joining")
+        .select(`
+          id, candidate_id, offer_id, joining_date, status, created_at
+        `),
+
+      supabase
+        .from("interviews")
+        .select(`
+          id, candidate_id, job_id, type, overall, created_at,
+          job_profiles ( id, title, company )
+        `),
+
+      supabase
+        .from("gd_sessions")
+        .select(`
+          id, title, job_id, status, scheduled_at, created_at,
+          job_profiles ( id, title, company )
+        `),
+    ]);
+
+    const [
+      candRes,
+      jobRes,
+      compRes,
+      colRes,
+      appRes,
+      offerRes,
+      joinRes,
+      intRes,
+      gdRes,
+    ] = results;
+
+    const candidates = candRes.status === "fulfilled" && !candRes.value.error ? candRes.value.data || [] : [];
+    const jobs = jobRes.status === "fulfilled" && !jobRes.value.error ? jobRes.value.data || [] : [];
+    const companies = compRes.status === "fulfilled" && !compRes.value.error ? compRes.value.data || [] : [];
+    const colleges = colRes.status === "fulfilled" && !colRes.value.error ? colRes.value.data || [] : [];
+    const applications = appRes.status === "fulfilled" && !appRes.value.error ? appRes.value.data || [] : [];
+    const offers = offerRes.status === "fulfilled" && !offerRes.value.error ? offerRes.value.data || [] : [];
+    const joining = joinRes.status === "fulfilled" && !joinRes.value.error ? joinRes.value.data || [] : [];
+    const interviews = intRes.status === "fulfilled" && !intRes.value.error ? intRes.value.data || [] : [];
+    const gdSessions = gdRes.status === "fulfilled" && !gdRes.value.error ? gdRes.value.data || [] : [];
+
+    res.json({
+      candidates,
+      jobs,
+      companies,
+      colleges,
+      applications,
+      offers,
+      joining,
+      interviews,
+      gdSessions,
+    });
+  } catch (err) {
+    console.error("Admin dashboard fetch error:", err);
+    res.status(500).json({ error: "Failed to load admin dashboard data" });
+  }
+});
 
 // ---- COLLEGES ----
 app.get("/api/colleges", requireStaff, async (req, res) => {
@@ -788,6 +919,77 @@ app.patch("/api/applications/:id/document", requireAuth, async (req, res) => {
   }
 });
 
+// ---- UPDATE APPLICATION STAGE (Secure Corporate / Admin pipeline move) ----
+app.patch("/api/applications/:id/stage", requireAdminOrCorporate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stage } = req.body;
+
+    const ALLOWED_STAGES = [
+      "Resume Review",
+      "Shortlisted",
+      "Aptitude",
+      "GD",
+      "Interview",
+      "Selected",
+      "Joined",
+      "Rejected",
+    ];
+
+    if (!stage || !ALLOWED_STAGES.includes(stage)) {
+      return res.status(400).json({ error: "Invalid or missing application stage" });
+    }
+
+    const profile = req.userProfile;
+    if (!profile) return res.status(401).json({ error: "User profile not found" });
+
+    // Admin has platform-wide permission
+    if (profile.role === "admin") {
+      const { data, error } = await supabase
+        .from("applications")
+        .update({ stage })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true, application: data });
+    }
+
+    // Corporate: must verify ownership of the job
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "No company associated with corporate user" });
+      }
+
+      const { data: appRow, error: appErr } = await supabase
+        .from("applications")
+        .select("id, job_id, job_profiles!inner(company_id)")
+        .eq("id", id)
+        .eq("job_profiles.company_id", profile.company_id)
+        .maybeSingle();
+
+      if (appErr || !appRow) {
+        return res.status(403).json({ error: "Access denied: application does not belong to your company's jobs" });
+      }
+
+      const { data, error } = await supabase
+        .from("applications")
+        .update({ stage })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ success: true, application: data });
+    }
+
+    return res.status(403).json({ error: "Not authorized to update application stage" });
+  } catch (err) {
+    console.error("Update application stage error:", err);
+    res.status(500).json({ error: "Failed to update application stage" });
+  }
+});
+
 // ---- MARK CANDIDATE SELECTED → fires 3 emails automatically ----
 app.post("/api/candidate/select", requireAdminOrCorporate, async (req, res) => {
   const { applicationId, ctc } = req.body;
@@ -943,6 +1145,194 @@ app.get("/api/offers", requireAuth, async (req, res) => {
   }
 
   res.json(filtered);
+});
+
+app.post("/api/offers", requireAdminOrCorporate, async (req, res) => {
+  try {
+    const { candidate_id, job_id, ctc, status, sent_on } = req.body;
+    const profile = req.userProfile;
+
+    if (!candidate_id || !job_id) {
+      return res.status(400).json({ error: "candidate_id and job_id are required" });
+    }
+
+    if (profile.role === "corporate") {
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "No company associated with corporate user" });
+      }
+
+      const { data: job, error: jobErr } = await supabase
+        .from("job_profiles")
+        .select("id, company_id")
+        .eq("id", job_id)
+        .maybeSingle();
+
+      if (jobErr || !job || job.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot create offers for another company's job" });
+      }
+    }
+
+    const { data: app, error: appErr } = await supabase
+      .from("applications")
+      .select("id, stage")
+      .eq("candidate_id", candidate_id)
+      .eq("job_id", job_id)
+      .maybeSingle();
+
+    if (appErr || !app) {
+      return res.status(400).json({ error: "Candidate has no active application for this job profile" });
+    }
+
+    const { data: existingOffer } = await supabase
+      .from("offers")
+      .select("id")
+      .eq("candidate_id", candidate_id)
+      .eq("job_id", job_id)
+      .maybeSingle();
+
+    if (existingOffer) {
+      return res.status(409).json({ error: "An offer already exists for this candidate and job profile", offerId: existingOffer.id });
+    }
+
+    const { data, error: insertErr } = await supabase
+      .from("offers")
+      .insert([{
+        candidate_id,
+        job_id,
+        ctc: ctc || null,
+        status: status || "Drafted",
+        sent_on: sent_on || null,
+      }])
+      .select("*, candidates(name), job_profiles(title, company)")
+      .single();
+
+    if (insertErr) {
+      return res.status(500).json({ error: insertErr.message });
+    }
+
+    return res.status(201).json(data);
+  } catch (err) {
+    console.error("Create offer error:", err);
+    res.status(500).json({ error: "Failed to create offer" });
+  }
+});
+
+// ---- INTERVIEWS ----
+app.get("/api/interviews", requireAuth, async (req, res) => {
+  try {
+    const profile = req.userProfile;
+    let query = supabase
+      .from("interviews")
+      .select("*, candidates(name, college_id, colleges(name)), job_profiles(title, company, company_id)")
+      .order("created_at", { ascending: false });
+
+    if (profile?.role === "corporate") {
+      if (!profile.company_id) return res.json([]);
+      const { data: jobs } = await supabase
+        .from("job_profiles")
+        .select("id")
+        .eq("company_id", profile.company_id);
+      const jobIds = (jobs || []).map((j) => j.id);
+      if (jobIds.length === 0) return res.json([]);
+      query = query.in("job_id", jobIds);
+    } else if (profile?.role === "candidate") {
+      if (!profile.candidate_id) return res.json([]);
+      query = query.eq("candidate_id", profile.candidate_id);
+    }
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/interviews", requireAdminOrCorporate, async (req, res) => {
+  try {
+    const { candidate_id, job_id, type, confidence, technical, communication, notes, recommendation } = req.body;
+    const profile = req.userProfile;
+
+    if (!candidate_id) {
+      return res.status(400).json({ error: "candidate_id is required" });
+    }
+
+    if (profile?.role === "corporate") {
+      if (!job_id) {
+        return res.status(400).json({ error: "job_id is required for corporate accounts" });
+      }
+      if (!profile.company_id) {
+        return res.status(403).json({ error: "No company associated with corporate user" });
+      }
+
+      const { data: job, error: jobErr } = await supabase
+        .from("job_profiles")
+        .select("id, company_id")
+        .eq("id", job_id)
+        .maybeSingle();
+
+      if (jobErr || !job || job.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot add interviews for another company's job" });
+      }
+
+      const { data: app } = await supabase
+        .from("applications")
+        .select("id")
+        .eq("candidate_id", candidate_id)
+        .eq("job_id", job_id)
+        .maybeSingle();
+
+      if (!app) {
+        return res.status(400).json({ error: "Candidate has no application for this job" });
+      }
+    }
+
+    let overall = null;
+    if (type === "Mock") {
+      const vals = [confidence, technical, communication].map(Number).filter((v) => !isNaN(v));
+      if (vals.length > 0) {
+        overall = Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1));
+      }
+    }
+
+    const { data, error: insertErr } = await supabase
+      .from("interviews")
+      .insert([{
+        candidate_id,
+        job_id: job_id || null,
+        type: type || "Mock",
+        confidence: type === "Mock" && confidence !== "" ? Number(confidence) : null,
+        technical: type === "Mock" && technical !== "" ? Number(technical) : null,
+        communication: type === "Mock" && communication !== "" ? Number(communication) : null,
+        overall,
+        notes: notes || null,
+        recommendation: recommendation || null,
+      }])
+      .select("*, candidates(name, college_id, colleges(name)), job_profiles(title, company)")
+      .single();
+
+    if (insertErr) return res.status(500).json({ error: insertErr.message });
+
+    if (job_id) {
+      await moveApplicationStage(supabase, {
+        candidateId: candidate_id,
+        jobId: job_id,
+        fromStage: "GD",
+        toStage: "Interview",
+      });
+      await moveApplicationStage(supabase, {
+        candidateId: candidate_id,
+        jobId: job_id,
+        fromStage: "Aptitude",
+        toStage: "Interview",
+      });
+    }
+
+    return res.status(201).json(data);
+  } catch (err) {
+    console.error("Add interview error:", err);
+    res.status(500).json({ error: "Failed to add interview" });
+  }
 });
 
 // ---- JOINING ----
@@ -2017,6 +2407,218 @@ app.post("/api/companies/:companyId/link-corporate-user", requireAdmin, async (r
     res.status(500).json({ error: err.message });
   }
 });
+// ---- ADMIN CANDIDATE MANAGEMENT: Safe Relational Deletion & Cascade ----
+
+// 0. Candidate Registration & Profile Application Endpoint
+// Enforces mandatory fields for all 12 required items:
+// 1. Full Name, 2. Email Address, 3. Mobile Number (10 digits), 4. Degree,
+// 5. Branch, 6. CGPA, 7. Passing Year, 8. College, 9. 10th %, 10. 12th %,
+// 11. Skills, 12. Resume PDF
+app.post("/api/candidates", async (req, res) => {
+  try {
+    const validation = validateCandidatePayload(req.body);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error, field: validation.field });
+    }
+
+    const {
+      name, email, degree, branch, cgpa, passing_year,
+      college_id, college_other, tenth_percentage, twelfth_percentage,
+      resume_url, photo_url, active_backlogs, linkedin_url, github_url
+    } = req.body;
+
+    const payload = {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: validation.cleanPhone,
+      degree: degree.trim(),
+      branch: branch.trim(),
+      cgpa: Number(cgpa),
+      passing_year: Number(passing_year),
+      college_id: college_id && typeof college_id === "string" && college_id.trim() ? college_id.trim() : null,
+      college_other: college_other && typeof college_other === "string" && college_other.trim() ? college_other.trim() : null,
+      tenth_percentage: Number(tenth_percentage),
+      twelfth_percentage: Number(twelfth_percentage),
+      skills: validation.skillsArray,
+      resume_url: resume_url.trim(),
+      photo_url: photo_url && typeof photo_url === "string" && photo_url.trim() ? photo_url.trim() : null,
+      active_backlogs: Boolean(active_backlogs),
+      linkedin_url: linkedin_url && typeof linkedin_url === "string" && linkedin_url.trim() ? linkedin_url.trim() : null,
+      github_url: github_url && typeof github_url === "string" && github_url.trim() ? github_url.trim() : null,
+    };
+
+    const { data: existing, error: lookupErr } = await supabase
+      .from("candidates")
+      .select("id")
+      .eq("email", payload.email)
+      .maybeSingle();
+
+    if (lookupErr) {
+      return res.status(500).json({ error: "Candidate lookup failed: " + lookupErr.message });
+    }
+
+    let candidate;
+    if (existing) {
+      const { data, error } = await supabase
+        .from("candidates")
+        .update(payload)
+        .eq("id", existing.id)
+        .select()
+        .single();
+      if (error) {
+        return res.status(500).json({ error: "Failed to update candidate: " + error.message });
+      }
+      candidate = data;
+    } else {
+      const { data, error } = await supabase
+        .from("candidates")
+        .insert([payload])
+        .select()
+        .single();
+      if (error) {
+        return res.status(500).json({ error: "Failed to create candidate: " + error.message });
+      }
+      candidate = data;
+    }
+
+    return res.status(201).json({ success: true, candidate });
+  } catch (err) {
+    console.error("Error saving candidate:", err);
+    return res.status(500).json({ error: "Internal server error: " + err.message });
+  }
+});
+
+// 1. Get candidate dependency breakdown for preview
+app.get("/api/admin/candidates/:id/dependencies", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ error: "Invalid candidate ID format" });
+    }
+
+    const { data: candidate, error: fetchErr } = await supabase
+      .from("candidates")
+      .select("id, name, email")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) {
+      return res.status(500).json({ error: "Failed to query candidate: " + fetchErr.message });
+    }
+    if (!candidate) {
+      return res.status(404).json({ error: "Candidate not found" });
+    }
+
+    const [appsRes, intsRes, gdsRes, offersRes, joiningRes, aptRes] = await Promise.all([
+      supabase.from("applications").select("id", { count: "exact", head: true }).eq("candidate_id", id),
+      supabase.from("interviews").select("id", { count: "exact", head: true }).eq("candidate_id", id),
+      supabase.from("gd_participants").select("id", { count: "exact", head: true }).eq("candidate_id", id),
+      supabase.from("offers").select("id", { count: "exact", head: true }).eq("candidate_id", id),
+      supabase.from("joining").select("id", { count: "exact", head: true }).eq("candidate_id", id),
+      supabase.from("aptitude_results").select("id", { count: "exact", head: true }).eq("candidate_id", id),
+    ]);
+
+    return res.status(200).json({
+      candidate: { id: candidate.id, name: candidate.name, email: candidate.email },
+      dependencies: {
+        applications: appsRes.count || 0,
+        interviews: intsRes.count || 0,
+        gd_sessions: gdsRes.count || 0,
+        offers: offersRes.count || 0,
+        joining: joiningRes.count || 0,
+        aptitude_results: aptRes.count || 0,
+      }
+    });
+  } catch (err) {
+    console.error("Server error querying candidate dependencies:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 2. Safe Cascade Delete of candidate and all associated recruitment records
+app.delete("/api/admin/candidates/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ error: "Invalid candidate ID format" });
+    }
+
+    // 1. Verify candidate exists
+    const { data: candidate, error: fetchErr } = await supabase
+      .from("candidates")
+      .select("id, name, email")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) {
+      return res.status(500).json({ error: "Failed to query candidate: " + fetchErr.message });
+    }
+    if (!candidate) {
+      return res.status(404).json({ error: "Candidate not found" });
+    }
+
+    // 2. Cascade delete dependent child records in order
+    const cleanupOperations = [
+      { table: "interviews", filterCol: "candidate_id" },
+      { table: "gd_participants", filterCol: "candidate_id" },
+      { table: "offers", filterCol: "candidate_id" },
+      { table: "joining", filterCol: "candidate_id" },
+      { table: "aptitude_results", filterCol: "candidate_id" },
+      { table: "saved_candidates", filterCol: "candidate_id" },
+      { table: "ai_interview_invites", filterCol: "candidate_id" },
+      { table: "applications", filterCol: "candidate_id" },
+    ];
+
+    const deletedCounts = {};
+    for (const op of cleanupOperations) {
+      const { data: delData, error: opErr } = await supabase
+        .from(op.table)
+        .delete()
+        .eq(op.filterCol, id)
+        .select("id");
+      if (opErr) {
+        console.warn(`Cascade deletion warning on table ${op.table}:`, opErr.message);
+      } else {
+        deletedCounts[op.table] = delData ? delData.length : 0;
+      }
+    }
+
+    // 3. Nullify candidate_id on any profile that references this candidate
+    await supabase
+      .from("profiles")
+      .update({ candidate_id: null })
+      .eq("candidate_id", id);
+
+    // 4. Delete root candidate record
+    const { error: candDelErr } = await supabase
+      .from("candidates")
+      .delete()
+      .eq("id", id);
+
+    if (candDelErr) {
+      console.error("Failed to delete root candidate record:", candDelErr);
+      return res.status(500).json({ error: "Failed to delete candidate: " + candDelErr.message });
+    }
+
+    // 5. Clean up legacy singular candidate table if a mirror record exists
+    await supabase.from("candidate").delete().eq("id", id);
+
+    return res.status(200).json({
+      success: true,
+      message: `Candidate "${candidate.name}" and all associated records deleted successfully.`,
+      deletedCandidate: {
+        id: candidate.id,
+        name: candidate.name,
+        email: candidate.email
+      },
+      deletedCounts
+    });
+  } catch (err) {
+    console.error("Server error deleting candidate:", err);
+    return res.status(500).json({ error: "Internal server error deleting candidate" });
+  }
+});
+
 // Log a new call
 app.post("/api/calls", requireStaff, async (req, res) => {
   try {
@@ -3114,7 +3716,7 @@ app.get("/api/corporate/candidates", requireCorporate, async (req, res) => {
   res.json(flat);
 });
 
-// Corporate: KPI summary
+// Corporate: KPI summary & Hiring Analytics
 app.get("/api/corporate/kpis", requireCorporate, async (req, res) => {
   const profile = req.userProfile;
   if (!profile.company_id) {
@@ -3123,41 +3725,125 @@ app.get("/api/corporate/kpis", requireCorporate, async (req, res) => {
       matchingCandidates: 0,
       jobProfiles: 0,
       locations: 0,
+      jobsPosted: 0,
+      activeJobs: 0,
+      applications: 0,
+      shortlisted: 0,
+      interviews: 0,
+      offers: 0,
+      joined: 0,
+      matchRate: 0,
+      hiringConversion: 0,
+      profiles: [],
+      experience: [],
+      locationsList: [],
     });
   }
 
   const { data: jobs } = await supabase
     .from("job_profiles")
-    .select("id")
+    .select("id, title")
     .eq("company_id", profile.company_id);
-  const jobIds = (jobs || []).map((j) => j.id);
 
-  let availableCandidates = 0;
+  const jobList = jobs || [];
+  const jobIds = jobList.map((j) => j.id);
+
+  let applications = 0;
+  let shortlisted = 0;
+  let interviews = 0;
+  let joined = 0;
+  let matchRate = 0;
   let matchingCandidates = 0;
-  const locationSet = new Set();
+  const locationMap = {};
+  const profileMap = {};
+  const expMap = { Freshers: 0, "1-2 Years": 0, "3+ Years": 0 };
+
+  jobList.forEach((j) => {
+    profileMap[j.title] = 0;
+  });
 
   if (jobIds.length > 0) {
     const { data: apps } = await supabase
       .from("applications")
-      .select("resume_score, candidates(colleges(name))")
+      .select("id, stage, resume_score, job_id, candidates(location, experience_years, colleges(name, city)), job_profiles(title)")
       .in("job_id", jobIds);
 
-    availableCandidates = apps?.length || 0;
-    matchingCandidates = (apps || []).filter(
-      (a) => (a.resume_score ?? 0) >= 70,
-    ).length;
-    (apps || []).forEach((a) => {
-      const loc = a.candidates?.colleges?.name;
-      if (loc) locationSet.add(loc);
+    const appList = apps || [];
+    applications = appList.length;
+
+    let totalScore = 0;
+    let scoredCount = 0;
+
+    appList.forEach((a) => {
+      const score = Number(a.resume_score || 0);
+      if (score > 0) {
+        totalScore += score;
+        scoredCount += 1;
+      }
+      if (score >= 70) {
+        matchingCandidates += 1;
+      }
+
+      if (a.stage === "Resume Review" || a.stage === "Shortlisted") shortlisted += 1;
+      if (a.stage === "Interview") interviews += 1;
+      if (a.stage === "Joined") joined += 1;
+
+      const pTitle = a.job_profiles?.title || "Other";
+      profileMap[pTitle] = (profileMap[pTitle] || 0) + 1;
+
+      const loc = a.candidates?.location || a.candidates?.colleges?.city || a.candidates?.colleges?.name || "Other";
+      locationMap[loc] = (locationMap[loc] || 0) + 1;
+
+      const yrs = Number(a.candidates?.experience_years || 0);
+      if (yrs <= 0) expMap["Freshers"] += 1;
+      else if (yrs <= 2) expMap["1-2 Years"] += 1;
+      else expMap["3+ Years"] += 1;
     });
+
+    if (scoredCount > 0) {
+      matchRate = Math.round(totalScore / scoredCount);
+    }
   }
 
+  let offerCount = 0;
+  if (jobIds.length > 0) {
+    const { data: off } = await supabase
+      .from("offers")
+      .select("id")
+      .in("job_id", jobIds);
+    offerCount = off?.length || 0;
+  }
+
+  const hiringConversion = applications > 0 ? Math.round((joined / applications) * 100) : 0;
+
+  const profilesArray = Object.entries(profileMap).map(([name, candidates]) => ({ name, candidates }));
+  const experienceArray = Object.entries(expMap).map(([name, candidates]) => ({ name, candidates }));
+  const locationsArray = Object.entries(locationMap).map(([name, count]) => ({ name, count }));
+
   res.json({
-    availableCandidates,
+    availableCandidates: applications,
     matchingCandidates,
     jobProfiles: jobIds.length,
-    locations: locationSet.size,
+    locations: locationsArray.length,
+    profiles: profilesArray,
+    experience: experienceArray,
+    locationsList: locationsArray,
+
+    jobsPosted: jobIds.length,
+    activeJobs: jobIds.length,
+    applications,
+    shortlisted,
+    interviews,
+    offers: offerCount,
+    joined,
+    matchRate,
+    hiringConversion,
   });
+});
+
+app.get("/api/corporate/hiring-analytics", requireCorporate, (req, res, next) => {
+  req.url = "/api/corporate/kpis";
+  app.handle(req, res, next);
 });
 
 

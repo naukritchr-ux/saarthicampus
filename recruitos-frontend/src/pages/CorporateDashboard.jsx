@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { getCorporateKpis, getCorporateCandidates } from "../lib/api";
 import {
   ResponsiveContainer,
   BarChart,
@@ -50,7 +51,46 @@ function CorporateDashboard({
   data = { kpis: {}, profiles: [], experience: [], locations: [] },
   candidates = [],
 }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [kpis, setKpis] = useState(data.kpis || {});
+  const [candidateList, setCandidateList] = useState(candidates || []);
+  const [profilesData, setProfilesData] = useState(data.profiles || []);
+  const [experienceData, setExperienceData] = useState(data.experience || []);
+  const [locationsData, setLocationsData] = useState(data.locations || []);
+
   const [selectedCandidate, setSelectedCandidate] = useState(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadDashboard() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [kpiRes, candRes] = await Promise.all([
+          getCorporateKpis().catch(() => ({})),
+          getCorporateCandidates().catch(() => []),
+        ]);
+        if (!ignore) {
+          setKpis(kpiRes || {});
+          setCandidateList(candRes || []);
+          setProfilesData(kpiRes?.profiles || []);
+          setExperienceData(kpiRes?.experience || []);
+          setLocationsData(kpiRes?.locationsList || kpiRes?.locations || []);
+        }
+      } catch (err) {
+        if (!ignore) setError(err.message || "Failed to load dashboard data");
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    loadDashboard();
+    return () => {
+      ignore = true;
+    };
+  }, []);
   const [showCandidateTable, setShowCandidateTable] = useState(false);
   const [profileChartType, setProfileChartType] = useState("profiles");
 
@@ -76,48 +116,44 @@ function CorporateDashboard({
   ======================================================= */
 
   const jobProfiles = useMemo(() => {
-    const profiles = candidates
-      .map((candidate) => candidate.role)
+    const profiles = candidateList.map((candidate) => candidate.role)
       .filter(Boolean);
 
     return ["All", ...Array.from(new Set(profiles)).sort()];
-  }, [candidates]);
+  }, [candidateList]);
 
   /* =======================================================
      DYNAMIC EXPERIENCE OPTIONS
   ======================================================= */
 
   const experienceOptions = useMemo(() => {
-    const values = candidates
-      .map((candidate) => candidate.experienceYears)
+    const values = candidateList.map((candidate) => candidate.experienceYears)
       .filter((value) => value !== undefined && value !== null);
 
     return ["All", ...Array.from(new Set(values)).sort((a, b) => a - b)];
-  }, [candidates]);
+  }, [candidateList]);
 
   /* =======================================================
      DYNAMIC LOCATION OPTIONS
   ======================================================= */
 
   const locationOptions = useMemo(() => {
-    const values = candidates
-      .map((candidate) => candidate.location)
+    const values = candidateList.map((candidate) => candidate.location)
       .filter(Boolean);
 
     return ["All", ...Array.from(new Set(values)).sort()];
-  }, [candidates]);
+  }, [candidateList]);
 
   /* =======================================================
      DYNAMIC STAGE OPTIONS
   ======================================================= */
 
   const stageOptions = useMemo(() => {
-    const values = candidates
-      .map((candidate) => candidate.stage)
+    const values = candidateList.map((candidate) => candidate.stage)
       .filter(Boolean);
 
     return ["All", ...Array.from(new Set(values))];
-  }, [candidates]);
+  }, [candidateList]);
 
   /* =======================================================
      GREETING
@@ -132,7 +168,7 @@ function CorporateDashboard({
   const filteredCandidates = useMemo(() => {
     const searchValue = search.toLowerCase().trim();
 
-    return candidates.filter((candidate) => {
+    return candidateList.filter((candidate) => {
       const matchesSearch =
         !searchValue ||
         candidate.name?.toLowerCase().includes(searchValue) ||
@@ -222,26 +258,30 @@ function CorporateDashboard({
 
   const chartData =
     profileChartType === "profiles"
-      ? data.profiles || []
-      : data.experience || [];
+      ? profilesData || []
+      : experienceData || [];
+
+  if (loading) {
+    return (
+      <div className="corporate-app" style={{ padding: "48px 24px", textAlign: "center", color: "var(--text-muted)" }}>
+        <p>Loading corporate dashboard...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="corporate-app" style={{ padding: "48px 24px", textAlign: "center", color: "crimson" }}>
+        <p>{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="corporate-app">
       {/* MAIN */}
       <main className="corporate-main" style={{ marginLeft: 0, width: "100%" }}>
-        {/* TOPBAR */}
-        <header className="corporate-topbar">
-          <div>
-            <h1>Corporate Dashboard</h1>
-            <p>Explore available talent and discover suitable candidates</p>
-          </div>
 
-          <div className="corporate-top-actions">
-            <button className="corporate-notification" type="button">
-              🔔
-            </button>
-          </div>
-        </header>
 
         {/* CONTENT */}
         <section className="corporate-content">
@@ -263,28 +303,28 @@ function CorporateDashboard({
           <div className="corporate-stats">
             <div className="corporate-stat-card">
               <div className="corporate-stat-icon">👥</div>
-              <h3>{data.kpis?.availableCandidates ?? 0}</h3>
+              <h3>{kpis?.availableCandidates ?? candidateList.length}</h3>
               <p>Available Candidates</p>
               <span className="corporate-stat-change">Talent Pool</span>
             </div>
 
             <div className="corporate-stat-card">
               <div className="corporate-stat-icon">⭐</div>
-              <h3>{data.kpis?.matchingCandidates ?? 0}</h3>
+              <h3>{kpis?.matchingCandidates ?? 0}</h3>
               <p>Matching Candidates</p>
               <span className="corporate-stat-change">High relevance</span>
             </div>
 
             <div className="corporate-stat-card">
               <div className="corporate-stat-icon">💼</div>
-              <h3>{data.kpis?.jobProfiles ?? 0}</h3>
+              <h3>{kpis?.jobProfiles ?? 0}</h3>
               <p>Job Profiles</p>
               <span className="corporate-stat-change">Specializations</span>
             </div>
 
             <div className="corporate-stat-card">
               <div className="corporate-stat-icon">📍</div>
-              <h3>{data.kpis?.locations ?? 0}</h3>
+              <h3>{kpis?.locations ?? 0}</h3>
               <p>Candidate Locations</p>
               <span className="corporate-stat-change">Available cities</span>
             </div>
@@ -392,14 +432,14 @@ function CorporateDashboard({
               </div>
 
               <div className="corporate-location-list">
-                {(data.locations || []).map((location) => (
+                {(locationsData || []).map((location) => (
                   <div className="corporate-location-row" key={location.name}>
                     <div>
                       <span>📍</span>
                       <strong>{location.name}</strong>
                     </div>
                     <div>
-                      <strong>{location.candidates}</strong>
+                      <strong>{location.candidates ?? location.count ?? 0}</strong>
                       <span>candidates</span>
                     </div>
                   </div>
@@ -417,7 +457,7 @@ function CorporateDashboard({
               </div>
 
               <div className="corporate-profile-list">
-                {(data.profiles || []).map((profile, index) => (
+                {(profilesData || []).map((profile, index) => (
                   <div className="corporate-profile-row" key={profile.name}>
                     <div>
                       <span className="corporate-profile-number">

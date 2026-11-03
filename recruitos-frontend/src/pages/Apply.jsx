@@ -130,16 +130,127 @@ export default function Apply() {
     e.preventDefault();
     setError('');
 
-    // Mandatory validations
-    if (!form.name.trim()) { setError('Full Name is required.'); return; }
-    if (!form.email.trim()) { setError('Email is required.'); return; }
-    if (!isValidEmail(form.email)) { setError('Please enter a valid email address.'); return; }
-    if (form.phone && form.phone.length !== 10) { setError('Phone number must be exactly 10 digits.'); return; }
-    if (!form.degree) { setError('Please select your degree.'); return; }
-    if (!form.branch.trim()) { setError('Branch / Specialization is required.'); return; }
-    if (!form.cgpa || isNaN(Number(form.cgpa))) { setError('Valid CGPA or percentage is required.'); return; }
-    if (!form.passing_year || isNaN(Number(form.passing_year))) { setError('Valid passing year is required.'); return; }
-    if (!file) { setError('Please upload your resume (PDF only, max 5MB).'); return; }
+    // Mandatory validations for all 12 required fields
+    // 1. Full Name
+    if (!form.name || !form.name.trim() || form.name.trim().length < 2) {
+      setError('Full Name is required (minimum 2 characters).');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 2. Email Address
+    if (!form.email || !form.email.trim()) {
+      setError('Email Address is required.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (!isValidEmail(form.email.trim())) {
+      setError('Please enter a valid email address.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 3. Mobile Number
+    const cleanPhone = sanitizePhone(form.phone || '');
+    if (!cleanPhone || cleanPhone.length !== 10) {
+      setError('Mobile Number is required (must be exactly 10 digits).');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 4. College / University
+    const hasCollege = (collegeMode === 'search' && Boolean(form.college_id)) || (form.college_other && form.college_other.trim().length > 0);
+    if (!hasCollege) {
+      setError('College / University is required. Please select from directory or enter college name.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 5. Degree
+    if (!form.degree || !form.degree.trim()) {
+      setError('Degree is required. Please select your degree.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 6. Branch / Specialization
+    if (!form.branch || !form.branch.trim()) {
+      setError('Branch / Specialization is required.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 7. CGPA / Percentage
+    if (form.cgpa === '' || form.cgpa === null || form.cgpa === undefined || isNaN(Number(form.cgpa))) {
+      setError('CGPA / Percentage is required.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const cgpaVal = Number(form.cgpa);
+    if (cgpaVal <= 0 || cgpaVal > 100) {
+      setError('Valid CGPA or percentage is required (between 0.1 and 100).');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 8. Passing Year
+    if (!form.passing_year || isNaN(Number(form.passing_year))) {
+      setError('Passing Year is required.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const passYearVal = Number(form.passing_year);
+    if (!Number.isInteger(passYearVal) || passYearVal < 1990 || passYearVal > 2040) {
+      setError('Valid passing year is required (between 1990 and 2040).');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 9. 10th Percentage
+    if (form.tenth_percentage === '' || form.tenth_percentage === null || form.tenth_percentage === undefined || isNaN(Number(form.tenth_percentage))) {
+      setError('10th Percentage is required.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const tenthVal = Number(form.tenth_percentage);
+    if (tenthVal <= 0 || tenthVal > 100) {
+      setError('10th Percentage must be between 1% and 100%.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 10. 12th / Diploma Percentage
+    if (form.twelfth_percentage === '' || form.twelfth_percentage === null || form.twelfth_percentage === undefined || isNaN(Number(form.twelfth_percentage))) {
+      setError('12th / Diploma Percentage is required.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const twelfthVal = Number(form.twelfth_percentage);
+    if (twelfthVal <= 0 || twelfthVal > 100) {
+      setError('12th / Diploma Percentage must be between 1% and 100%.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 11. Technical / Domain Skills
+    if (!form.skills || !form.skills.trim()) {
+      setError('Technical / Domain Skills are required (please enter at least one skill).');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const parsedSkills = form.skills.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parsedSkills.length === 0) {
+      setError('Technical / Domain Skills must contain at least one valid skill.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // 12. Resume PDF (maximum 5 MB)
+    if (!file) {
+      setError('Resume PDF is required. Please upload your latest resume.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setError('Please upload your resume in PDF format (.pdf).');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Resume file size exceeds the 5MB limit. Please compress your PDF or choose a smaller file.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
 
     setLoading(true);
     try {
@@ -430,7 +541,7 @@ export default function Apply() {
 
                 <div>
                   <label className="student-label">
-                    Mobile Number <span className="student-label-sub">(Optional - 10 digits)</span>
+                    Mobile Number * <span className="student-label-sub">(10 digits)</span>
                   </label>
                   <input
                     className="student-input"
@@ -439,6 +550,7 @@ export default function Apply() {
                     inputMode="numeric"
                     maxLength={10}
                     placeholder="10-digit mobile number"
+                    required
                   />
                 </div>
 
@@ -568,7 +680,7 @@ export default function Apply() {
               {/* College Picker */}
               <div style={{ marginBottom: 14 }}>
                 <label className="student-label">
-                  College / University <span className="student-label-sub">(Search campus directory or enter name)</span>
+                  College / University * <span className="student-label-sub">(Search campus directory or enter name)</span>
                 </label>
                 {collegeMode === 'search' ? (
                   <CollegeAutocomplete
@@ -587,6 +699,7 @@ export default function Apply() {
                       value={form.college_other}
                       onChange={(e) => setForm({ ...form, college_other: e.target.value })}
                       placeholder="Type your college or university name"
+                      required
                     />
                     <button
                       type="button"
@@ -647,11 +760,13 @@ export default function Apply() {
 
                 <div>
                   <label className="student-label">
-                    CGPA / Percentage *
+                    CGPA / Percentage * <span className="student-label-sub">(0.1–10.0 or 1–100%)</span>
                   </label>
                   <input
                     type="number"
                     step="0.01"
+                    min="0.1"
+                    max="100"
                     className="student-input"
                     value={form.cgpa}
                     onChange={(e) => setForm({ ...form, cgpa: e.target.value })}
@@ -662,10 +777,12 @@ export default function Apply() {
 
                 <div>
                   <label className="student-label">
-                    Passing Year *
+                    Passing Year * <span className="student-label-sub">(e.g. 2026)</span>
                   </label>
                   <input
                     type="number"
+                    min="1990"
+                    max="2040"
                     className="student-input"
                     value={form.passing_year}
                     onChange={(e) => setForm({ ...form, passing_year: e.target.value })}
@@ -676,29 +793,35 @@ export default function Apply() {
 
                 <div>
                   <label className="student-label">
-                    10th Percentage <span className="student-label-sub">(Optional)</span>
+                    10th Percentage * <span className="student-label-sub">(0–100%)</span>
                   </label>
                   <input
                     type="number"
                     step="0.01"
+                    min="1"
+                    max="100"
                     className="student-input"
                     value={form.tenth_percentage}
                     onChange={(e) => setForm({ ...form, tenth_percentage: e.target.value })}
                     placeholder="e.g. 85.5"
+                    required
                   />
                 </div>
 
                 <div>
                   <label className="student-label">
-                    12th Percentage / Diploma <span className="student-label-sub">(Optional)</span>
+                    12th / Diploma Percentage * <span className="student-label-sub">(0–100%)</span>
                   </label>
                   <input
                     type="number"
                     step="0.01"
+                    min="1"
+                    max="100"
                     className="student-input"
                     value={form.twelfth_percentage}
                     onChange={(e) => setForm({ ...form, twelfth_percentage: e.target.value })}
                     placeholder="e.g. 82.0"
+                    required
                   />
                 </div>
               </div>
@@ -730,13 +853,14 @@ export default function Apply() {
 
               <div style={{ marginBottom: 14 }}>
                 <label className="student-label">
-                  Technical & Domain Skills <span className="student-label-sub">(Optional - comma separated)</span>
+                  Technical & Domain Skills * <span className="student-label-sub">(Comma separated, e.g. React, Python, SQL)</span>
                 </label>
                 <input
                   className="student-input"
                   value={form.skills}
                   onChange={(e) => setForm({ ...form, skills: e.target.value })}
                   placeholder="e.g. React, Node.js, Python, SQL, Machine Learning, Java"
+                  required
                 />
                 <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
                   💡 Skills are evaluated by our AI matching engine against employer requirements.
@@ -778,7 +902,7 @@ export default function Apply() {
                 <div className="student-badge">4</div>
                 <div>
                   <h2 className="student-section-title">Resume *</h2>
-                  <p className="student-section-subtitle">Upload your latest PDF resume for automated parsing and match scoring</p>
+                  <p className="student-section-subtitle">Upload your latest PDF resume for automated parsing and match scoring (max 5MB)</p>
                 </div>
               </div>
 

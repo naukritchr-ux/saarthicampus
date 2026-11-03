@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { openSecureDocument } from "../lib/api";
+import { openSecureDocument, selectCandidate, rejectCandidate } from "../lib/api";
 import CandidateAvatar from "../components/CandidateAvatar";
 
 export default function Approvals() {
@@ -83,32 +83,24 @@ export default function Approvals() {
   }, []);
 
   async function handleApprove(applicationId) {
-    const { error } = await supabase
-      .from("applications")
-      .update({ stage: "Selected" })
-      .eq("id", applicationId);
-
-    if (error) {
-      alert("Could not approve candidate.");
-    } else {
+    try {
+      await selectCandidate(applicationId);
       setSelectedApp(null);
       await loadShortlisted();
+    } catch (err) {
+      alert("Could not approve candidate: " + err.message);
     }
   }
 
   async function handleReject(applicationId) {
     if (!window.confirm("Reject this candidate?")) return;
 
-    const { error } = await supabase
-      .from("applications")
-      .update({ stage: "Rejected" })
-      .eq("id", applicationId);
-
-    if (error) {
-      alert("Could not reject candidate.");
-    } else {
+    try {
+      await rejectCandidate(applicationId);
       setSelectedApp(null);
       await loadShortlisted();
+    } catch (err) {
+      alert("Could not reject candidate: " + err.message);
     }
   }
 

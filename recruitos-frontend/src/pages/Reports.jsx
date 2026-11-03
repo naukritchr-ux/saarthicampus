@@ -41,7 +41,6 @@ const ANALYTICS_TARGETS = {
 const REPORT_LIST = [
   { key: "campus", icon: "🏛️", t: "Campus-wise Report", d: "Performance per college" },
   { key: "company", icon: "🏢", t: "Company-wise Report", d: "Performance per company" },
-  { key: "recruiter", icon: "🧑‍💼", t: "Recruiter Performance", d: "Drives handled, conversion" },
   { key: "funnel", icon: "🔻", t: "Hiring Funnel", d: "Applied → Joined" },
   { key: "selection", icon: "📝", t: "Selection Report", d: "Shortlist to offer" },
   { key: "joining", icon: "🤝", t: "Joining Report", d: "Accepted vs joined" },
@@ -72,6 +71,18 @@ function getRecruiterName(application) {
     application?.recruiter_email ||
     "Unassigned"
   );
+}
+
+function inAcademicYear(dateStr, ay) {
+  if (!dateStr || !ay || ay === "all") return true;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return true;
+  const [startStr] = ay.split("-");
+  const startYear = parseInt(startStr, 10);
+  if (isNaN(startYear)) return true;
+  const start = new Date(startYear, 5, 1); // June 1 of start year
+  const end = new Date(startYear + 1, 5, 1); // June 1 of next year
+  return d >= start && d < end;
 }
 
 function getJobName(application) {
@@ -173,8 +184,36 @@ export default function Reports() {
 
   const [active, setActive] = useState("campus");
 
-  const [academicYear, setAcademicYear] = useState("2026-27");
+  const [academicYear, setAcademicYear] = useState("all");
   const [driveStatus, setDriveStatus] = useState("all");
+  const [appliedFilters, setAppliedFilters] = useState({ academicYear: "all", driveStatus: "all" });
+
+  function handleApplyFilters() {
+    setAppliedFilters({ academicYear, driveStatus });
+  }
+
+  function handleResetFilters() {
+    setAcademicYear("all");
+    setDriveStatus("all");
+    setAppliedFilters({ academicYear: "all", driveStatus: "all" });
+  }
+
+  const filteredApps = useMemo(() => {
+    return apps.filter((a) => {
+      if (!inAcademicYear(a.created_at, appliedFilters.academicYear)) return false;
+      if (appliedFilters.driveStatus === "active" && ["Selected", "Joined", "Rejected"].includes(a.stage)) return false;
+      if (appliedFilters.driveStatus === "closed" && !["Selected", "Joined", "Rejected"].includes(a.stage)) return false;
+      return true;
+    });
+  }, [apps, appliedFilters]);
+
+  const filteredOffers = useMemo(() => {
+    return offers.filter((o) => inAcademicYear(o.sent_on || o.created_at, appliedFilters.academicYear));
+  }, [offers, appliedFilters]);
+
+  const filteredJoining = useMemo(() => {
+    return joining.filter((j) => inAcademicYear(j.joining_date || j.created_at, appliedFilters.academicYear));
+  }, [joining, appliedFilters]);
 
   /* -------------------------------------------------------
      LOAD DATA
@@ -226,7 +265,7 @@ export default function Reports() {
 
   const campusRows = useMemo(() => {
     const byCollege = {};
-    apps.forEach((a) => {
+    filteredApps.forEach((a) => {
       const name = a?.candidates?.colleges?.name || a?.college_name || "Unknown";
       if (!byCollege[name]) byCollege[name] = { name, drives: new Set(), total: 0, selected: 0, joined: 0 };
       byCollege[name].total += 1;
@@ -244,16 +283,16 @@ export default function Reports() {
         placementRate: pct(c.selected, c.total),
       }))
       .sort((x, y) => y.applications - x.applications);
-  }, [apps]);
+  }, [filteredApps]);
 
   const campusStats = useMemo(() => {
     const totalCampuses = colleges.length || campusRows.length;
-    const totalDrives = new Set(apps.map((a) => a.job_id).filter(Boolean)).size;
-    const totalApplications = apps.length;
-    const totalSelections = apps.filter((a) => a.stage === "Selected").length;
+    const totalDrives = new Set(filteredApps.map((a) => a.job_id).filter(Boolean)).size;
+    const totalApplications = filteredApps.length;
+    const totalSelections = filteredApps.filter((a) => a.stage === "Selected").length;
     const placementRate = pct(totalSelections, totalApplications);
     return { totalCampuses, totalDrives, totalApplications, totalSelections, placementRate };
-  }, [colleges, apps, campusRows]);
+  }, [colleges, filteredApps, campusRows]);
 
   const campusInsights = useMemo(() => {
     if (campusRows.length === 0) return [];
@@ -274,7 +313,7 @@ export default function Reports() {
 
   const companyRows = useMemo(() => {
     const byCompany = {};
-    apps.forEach((a) => {
+    filteredApps.forEach((a) => {
       const name = a?.job_profiles?.company || a?.company_name || "Unknown";
       if (!byCompany[name]) byCompany[name] = { name, drives: new Set(), total: 0, selected: 0, joined: 0 };
       byCompany[name].total += 1;
@@ -292,15 +331,15 @@ export default function Reports() {
         placementRate: pct(c.selected, c.total),
       }))
       .sort((x, y) => y.applications - x.applications);
-  }, [apps]);
+  }, [filteredApps]);
 
   const companyStats = useMemo(() => {
     const totalCompanies = companies.length || companyRows.length;
     const totalJobs = jobs.length;
-    const totalApplications = apps.length;
-    const totalSelections = apps.filter((a) => a.stage === "Selected").length;
+    const totalApplications = filteredApps.length;
+    const totalSelections = filteredApps.filter((a) => a.stage === "Selected").length;
     return { totalCompanies, totalJobs, totalApplications, totalSelections };
-  }, [companies, jobs, apps, companyRows]);
+  }, [companies, jobs, filteredApps, companyRows]);
 
   const companyInsights = useMemo(() => {
     if (companyRows.length === 0) return [];
@@ -369,26 +408,26 @@ export default function Reports() {
 
   const funnelRows = useMemo(() => {
     const counts = {};
-    apps.forEach((a) => { counts[a.stage] = (counts[a.stage] || 0) + 1; });
+    filteredApps.forEach((a) => { counts[a.stage] = (counts[a.stage] || 0) + 1; });
     return FUNNEL_ORDER.filter((s) => counts[s]).map((s) => ({ stage: s, count: counts[s] }));
-  }, [apps]);
+  }, [filteredApps]);
 
   const funnelStats = useMemo(() => {
-    const applied = apps.length;
-    const interview = apps.filter((a) => a.stage === "Interview").length;
-    const selected = apps.filter((a) => a.stage === "Selected").length;
-    const joined = apps.filter((a) => a.stage === "Joined").length;
+    const applied = filteredApps.length;
+    const interview = filteredApps.filter((a) => a.stage === "Interview").length;
+    const selected = filteredApps.filter((a) => a.stage === "Selected").length;
+    const joined = filteredApps.filter((a) => a.stage === "Joined").length;
     return { applied, interview, selected, joined };
-  }, [apps]);
+  }, [filteredApps]);
 
   /* -------------------------------------------------------
      SELECTION / JOINING
   ------------------------------------------------------- */
 
-  const selectedCount = apps.filter((a) => a.stage === "Selected").length;
-  const offersSent = offers.length;
-  const offersAccepted = offers.filter((o) => o.status === "Accepted").length;
-  const joinedCount = joining.filter((j) => j.status === "Joined").length;
+  const selectedCount = filteredApps.filter((a) => a.stage === "Selected").length;
+  const offersSent = filteredOffers.length;
+  const offersAccepted = filteredOffers.filter((o) => o.status === "Accepted").length;
+  const joinedCount = filteredJoining.filter((j) => j.status === "Joined").length;
 
   /* -------------------------------------------------------
      OFFER ACCEPTANCE
@@ -396,7 +435,7 @@ export default function Reports() {
 
   const acceptanceByMonth = useMemo(() => {
     const byMonth = {};
-    offers.forEach((o) => {
+    filteredOffers.forEach((o) => {
       if (!o.sent_on) return;
       const m = new Date(o.sent_on).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
       if (!byMonth[m]) byMonth[m] = { month: m, sent: 0, accepted: 0 };
@@ -404,7 +443,7 @@ export default function Reports() {
       if (o.status === "Accepted") byMonth[m].accepted += 1;
     });
     return Object.values(byMonth).map((r) => ({ ...r, rate: pct(r.accepted, r.sent) }));
-  }, [offers]);
+  }, [filteredOffers]);
 
   /* -------------------------------------------------------
      MONTHLY
@@ -412,7 +451,7 @@ export default function Reports() {
 
   const monthlyRows = useMemo(() => {
     const byMonth = {};
-    apps.forEach((a) => {
+    filteredApps.forEach((a) => {
       if (!a.created_at) return;
       const m = new Date(a.created_at).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
       if (!byMonth[m]) byMonth[m] = { month: m, applied: 0, selected: 0, joined: 0 };
@@ -421,7 +460,7 @@ export default function Reports() {
       if (a.stage === "Joined") byMonth[m].joined += 1;
     });
     return Object.values(byMonth);
-  }, [apps]);
+  }, [filteredApps]);
 
   /* -------------------------------------------------------
      CALL RECORDS
@@ -455,9 +494,9 @@ export default function Reports() {
     const total = colleges.length;
     const active = colleges.filter((c) => c.status !== "Inactive").length;
     const inactive = total - active;
-    const studentsShared = apps.filter((a) => a?.candidates?.college_id).length;
+    const studentsShared = filteredApps.filter((a) => a?.candidates?.college_id).length;
     return { total, active, inactive, studentsShared };
-  }, [colleges, apps]);
+  }, [colleges, filteredApps]);
 
   const corporateStats = useMemo(() => {
     const total = companies.length;
@@ -470,11 +509,11 @@ export default function Reports() {
   const candidateStats = useMemo(() => {
     const total = candidates.length;
     const profileCompleted = candidates.filter((c) => c.resume_url && c.degree && c.branch && c.cgpa).length;
-    const applications = apps.length;
-    const selected = apps.filter((a) => a.stage === "Selected").length;
-    const joined = apps.filter((a) => a.stage === "Joined").length;
+    const applications = filteredApps.length;
+    const selected = filteredApps.filter((a) => a.stage === "Selected").length;
+    const joined = filteredApps.filter((a) => a.stage === "Joined").length;
     return { total, profileCompleted, applications, selected, joined };
-  }, [candidates, apps]);
+  }, [candidates, filteredApps]);
 
   /* -------------------------------------------------------
      RENDER HELPERS FOR EACH REPORT
@@ -1094,6 +1133,7 @@ export default function Reports() {
             <div className="rp-filter-field">
               <label>Academic Year</label>
               <select value={academicYear} onChange={(e) => setAcademicYear(e.target.value)}>
+                <option value="all">All Academic Years</option>
                 <option value="2026-27">2026-27</option>
                 <option value="2025-26">2025-26</option>
                 <option value="2024-25">2024-25</option>
@@ -1105,11 +1145,25 @@ export default function Reports() {
               <label>Drive Status</label>
               <select value={driveStatus} onChange={(e) => setDriveStatus(e.target.value)}>
                 <option value="all">All Drives</option>
-                <option value="active">Active</option>
-                <option value="closed">Closed</option>
+                <option value="active">Active In Pipeline</option>
+                <option value="closed">Closed / Finalized</option>
               </select>
             </div>
-            <button className="btn-primary rp-apply-filters">🔻 Apply Filters</button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="btn-primary rp-apply-filters" style={{ flex: 1 }} onClick={handleApplyFilters}>
+                🔻 Apply Filters
+              </button>
+              {(appliedFilters.academicYear !== "all" || appliedFilters.driveStatus !== "all") && (
+                <button className="btn-outline" onClick={handleResetFilters}>
+                  Reset
+                </button>
+              )}
+            </div>
+            {(appliedFilters.academicYear !== "all" || appliedFilters.driveStatus !== "all") && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                Active filter: {appliedFilters.academicYear !== 'all' ? `AY ${appliedFilters.academicYear}` : ''} {appliedFilters.driveStatus !== 'all' ? `(${appliedFilters.driveStatus})` : ''} · ${filteredApps.length} applications
+              </div>
+            )}
           </div>
         </div>
       </div>
