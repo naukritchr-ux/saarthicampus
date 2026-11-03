@@ -8,14 +8,24 @@ async function moveApplicationStage(supabase, { candidateId, jobId, fromStage, t
 
   let query = supabase
     .from('applications')
-    .select('id, stage')
+    .select('id, stage, job_id')
     .eq('candidate_id', candidateId)
     .eq('stage', fromStage);
 
-  if (jobId) query = query.eq('job_id', jobId);
+  if (jobId) {
+    query = query.eq('job_id', jobId);
+  }
 
   const { data: apps, error } = await query;
   if (error || !apps || apps.length === 0) return null;
+
+  // Multi-job safety guard: If jobId was not provided and candidate has more than 1
+  // application in fromStage, advancing all of them would cross company boundaries!
+  // If there is exactly 1 application in fromStage, it is safe to advance.
+  if (!jobId && apps.length > 1) {
+    console.warn(`pipelineSync: candidate ${candidateId} has ${apps.length} applications in stage ${fromStage}, but no jobId was provided. Refusing to bulk-advance across jobs.`);
+    return null;
+  }
 
   const { data, error: updateErr } = await supabase
     .from('applications')

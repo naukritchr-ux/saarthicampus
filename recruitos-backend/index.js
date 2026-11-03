@@ -55,6 +55,7 @@ const {
   requireAdmin,
   requireStaff,
   requireCorporate,
+  requireAdminOrCorporate,
 } = createAuthMiddleware(supabase);
 
 // ---- COLLEGES ----
@@ -94,7 +95,7 @@ app.get("/api/companies", requireAuth, async (req, res) => {
   } else if (profile?.role === "corporate" && !profile.company_id) {
     return res.json([]);
   }
-  // admin, recruiter see all companies
+  // admin sees all companies
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error });
@@ -125,7 +126,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
   } else if (profile?.role === "candidate") {
     return res.status(403).json({ error: "Not authorized" });
   } else {
-    // Admin / recruiter can optionally filter by company_id
+    // Admin can optionally filter by company_id
     if (req.query.company_id) {
       query = query.eq("company_id", req.query.company_id);
     }
@@ -136,7 +137,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
   res.json(data);
 });
 
-app.post("/api/jobs", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+app.post("/api/jobs", requireAdminOrCorporate, async (req, res) => {
   try {
     const profile = req.userProfile;
     const {
@@ -211,7 +212,7 @@ app.post("/api/jobs", requireRole("admin", "recruiter", "corporate"), async (req
   }
 });
 
-app.patch("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+app.patch("/api/jobs/:id", requireAdminOrCorporate, async (req, res) => {
   try {
     const profile = req.userProfile;
     const { id } = req.params;
@@ -246,7 +247,7 @@ app.patch("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), async
         : (req.body.skills || "").split(",").map((s) => s.trim()).filter(Boolean);
     }
 
-    if (profile.role === "admin" || profile.role === "recruiter") {
+    if (profile.role === "admin") {
       if (req.body.company_id !== undefined) {
         if (req.body.company_id) {
           const { data: comp, error: compErr } = await supabase
@@ -282,7 +283,7 @@ app.patch("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), async
   }
 });
 
-app.delete("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+app.delete("/api/jobs/:id", requireAdminOrCorporate, async (req, res) => {
   try {
     const profile = req.userProfile;
     const { id } = req.params;
@@ -315,7 +316,7 @@ app.delete("/api/jobs/:id", requireRole("admin", "recruiter", "corporate"), asyn
   }
 });
 
-app.post("/api/jobs/bulk-import", requireRole("admin", "recruiter", "corporate"), async (req, res) => {
+app.post("/api/jobs/bulk-import", requireAdminOrCorporate, async (req, res) => {
   try {
     const profile = req.userProfile;
     const { rows } = req.body;
@@ -530,8 +531,8 @@ app.get("/api/documents/signed-url", requireAuth, async (req, res) => {
       return res.status(401).json({ error: "User profile not found" });
     }
 
-    // Admins and recruiters have full operational access to student documents
-    if (profile.role === "admin" || profile.role === "recruiter") {
+    // Admins have full operational access to student documents
+    if (profile.role === "admin") {
       const { data: signedData, error: signErr } = await supabase.storage
         .from(targetBucket)
         .createSignedUrl(sanitizedPath, 60 * 15);
@@ -734,7 +735,7 @@ app.patch("/api/applications/:id/document", requireAuth, async (req, res) => {
     }
 
     // Staff has full access to update application documents
-    if (profile.role === "admin" || profile.role === "recruiter") {
+    if (profile.role === "admin") {
       const { data, error } = await supabase
         .from("applications")
         .update({
@@ -788,17 +789,28 @@ app.patch("/api/applications/:id/document", requireAuth, async (req, res) => {
 });
 
 // ---- MARK CANDIDATE SELECTED → fires 3 emails automatically ----
-app.post("/api/candidate/select", requireStaff, async (req, res) => {
+app.post("/api/candidate/select", requireAdminOrCorporate, async (req, res) => {
   const { applicationId, ctc } = req.body;
+  const profile = req.userProfile;
 
   try {
     const { data: app } = await supabase
       .from("applications")
       .select(
-        "*, candidates(name, email, phone, college), job_profiles(title, company)",
+        "*, candidates(name, email, phone, college), job_profiles(title, company, company_id)",
       )
       .eq("id", applicationId)
       .single();
+
+    if (!app) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+
+    if (profile?.role === "corporate") {
+      if (!profile.company_id || app.job_profiles?.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot select candidates for another company's job" });
+      }
+    }
 
     const { data: college } = await supabase
       .from("colleges")
@@ -861,14 +873,25 @@ app.post("/api/candidate/select", requireStaff, async (req, res) => {
 
 const { sendStudentRejectionEmail } = require("./emailService"); // add to your existing require line for emailService instead of a new line — merge with existing import
 
-app.post("/api/candidate/reject", requireStaff, async (req, res) => {
+app.post("/api/candidate/reject", requireAdminOrCorporate, async (req, res) => {
   const { applicationId } = req.body;
+  const profile = req.userProfile;
   try {
     const { data: app } = await supabase
       .from("applications")
-      .select("*, candidates(name, email), job_profiles(title, company)")
+      .select("*, candidates(name, email), job_profiles(title, company, company_id)")
       .eq("id", applicationId)
       .single();
+
+    if (!app) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+
+    if (profile?.role === "corporate") {
+      if (!profile.company_id || app.job_profiles?.company_id !== profile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot reject candidates for another company's job" });
+      }
+    }
 
     await supabase
       .from("applications")
@@ -915,7 +938,7 @@ app.get("/api/offers", requireAuth, async (req, res) => {
     filtered = data.filter(
       (o) => o.job_profiles?.company_id === profile.company_id,
     );
-  } else if (profile?.role !== "admin" && profile?.role !== "recruiter") {
+  } else if (profile?.role !== "admin") {
     return res.status(403).json({ error: "Not authorized" });
   }
 
@@ -958,19 +981,75 @@ app.post("/api/communications", requireStaff, async (req, res) => {
 app.post("/api/generate-email", requireStaff, generateEmail);
 
 // Create GD Session
-app.post("/api/gd/create", requireStaff, async (req, res) => {
+app.post("/api/gd/create", requireAdminOrCorporate, async (req, res) => {
   try {
     const { topic, duration_minutes, job_id, candidates } = req.body;
+    const userRole = req.userProfile?.role;
+    const userCompanyId = req.userProfile?.company_id;
 
-    const dailyRoom = await createGDRoom(`gd-${Date.now()}`, duration_minutes);
+    if (!topic || !Array.isArray(candidates) || candidates.length === 0) {
+      return res.status(400).json({ error: "Topic and at least one candidate are required." });
+    }
+
+    let companyIdToSet = null;
+    let targetJobId = job_id || null;
+
+    if (userRole === "corporate") {
+      if (!userCompanyId) {
+        return res.status(403).json({ error: "Corporate profile is not linked to any company." });
+      }
+      if (!targetJobId) {
+        return res.status(400).json({ error: "Job profile is required for Corporate GD sessions." });
+      }
+      // Verify job belongs to corporate user's company
+      const { data: jobData, error: jobErr } = await supabase
+        .from("job_profiles")
+        .select("id, company_id")
+        .eq("id", targetJobId)
+        .single();
+
+      if (jobErr || !jobData || jobData.company_id !== userCompanyId) {
+        return res.status(403).json({ error: "Selected job profile does not belong to your company." });
+      }
+      companyIdToSet = userCompanyId;
+
+      // Verify selected candidates have applications for this specific job
+      const candidateIds = candidates.map((c) => c.id).filter(Boolean);
+      const { data: validApps, error: appErr } = await supabase
+        .from("applications")
+        .select("candidate_id")
+        .eq("job_id", targetJobId)
+        .in("candidate_id", candidateIds);
+
+      if (appErr) return res.status(500).json({ error: "Failed to verify candidate applications." });
+      const validCandidateIdSet = new Set((validApps || []).map((a) => a.candidate_id));
+      const invalidCandidate = candidateIds.find((id) => !validCandidateIdSet.has(id));
+      if (invalidCandidate) {
+        return res.status(400).json({ error: "One or more selected candidates have not applied to this job profile." });
+      }
+    } else if (userRole === "admin") {
+      if (targetJobId) {
+        const { data: jData } = await supabase
+          .from("job_profiles")
+          .select("company_id")
+          .eq("id", targetJobId)
+          .maybeSingle();
+        companyIdToSet = jData?.company_id || null;
+      }
+    }
+
+    const duration = Number(duration_minutes) || 30;
+    const dailyRoom = await createGDRoom(`gd-${Date.now()}`, duration);
 
     const { data: session, error } = await supabase
       .from("gd_sessions")
       .insert([
         {
           topic,
-          duration_minutes,
-          job_id,
+          duration_minutes: duration,
+          job_id: targetJobId,
+          company_id: companyIdToSet,
+          mode: "online",
           daily_room_url: dailyRoom.url,
           daily_room_name: dailyRoom.name,
         },
@@ -978,7 +1057,7 @@ app.post("/api/gd/create", requireStaff, async (req, res) => {
       .select()
       .single();
 
-    if (error) return res.status(500).json({ error });
+    if (error) return res.status(500).json({ error: error.message || error });
 
     const participants = candidates.map((c) => ({
       session_id: session.id,
@@ -1003,7 +1082,7 @@ app.post("/api/gd/create", requireStaff, async (req, res) => {
           studentName: p.candidate_name,
           studentEmail: p.candidate_email,
           topic: session.topic,
-          duration: duration_minutes,
+          duration: duration,
           joinLink: `${process.env.FRONTEND_URL}/gd/${session.id}?token=${p.join_token}`,
         });
       } catch (emailErr) {
@@ -1022,20 +1101,74 @@ app.post("/api/gd/create", requireStaff, async (req, res) => {
 });
 
 // Create an OFFLINE GD session — no video room, no emails, just a shell for manual ratings
-app.post("/api/gd/create-offline", requireStaff, async (req, res) => {
+app.post("/api/gd/create-offline", requireAdminOrCorporate, async (req, res) => {
   try {
-    const { topic, candidates } = req.body;
+    const { topic, job_id, candidates } = req.body;
+    const userRole = req.userProfile?.role;
+    const userCompanyId = req.userProfile?.company_id;
 
-    if (!topic || !candidates || candidates.length === 0) {
+    if (!topic || !Array.isArray(candidates) || candidates.length === 0) {
       return res
         .status(400)
         .json({ error: "Topic and at least one candidate are required" });
     }
 
+    let companyIdToSet = null;
+    let targetJobId = job_id || null;
+
+    if (userRole === "corporate") {
+      if (!userCompanyId) {
+        return res.status(403).json({ error: "Corporate profile is not linked to any company." });
+      }
+      if (!targetJobId) {
+        return res.status(400).json({ error: "Job profile is required for Corporate GD sessions." });
+      }
+      const { data: jobData, error: jobErr } = await supabase
+        .from("job_profiles")
+        .select("id, company_id")
+        .eq("id", targetJobId)
+        .single();
+
+      if (jobErr || !jobData || jobData.company_id !== userCompanyId) {
+        return res.status(403).json({ error: "Selected job profile does not belong to your company." });
+      }
+      companyIdToSet = userCompanyId;
+
+      const candidateIds = candidates.map((c) => c.id).filter(Boolean);
+      const { data: validApps, error: appErr } = await supabase
+        .from("applications")
+        .select("candidate_id")
+        .eq("job_id", targetJobId)
+        .in("candidate_id", candidateIds);
+
+      if (appErr) return res.status(500).json({ error: "Failed to verify candidate applications." });
+      const validCandidateIdSet = new Set((validApps || []).map((a) => a.candidate_id));
+      const invalidCandidate = candidateIds.find((id) => !validCandidateIdSet.has(id));
+      if (invalidCandidate) {
+        return res.status(400).json({ error: "One or more selected candidates have not applied to this job profile." });
+      }
+    } else if (userRole === "admin") {
+      if (targetJobId) {
+        const { data: jData } = await supabase
+          .from("job_profiles")
+          .select("company_id")
+          .eq("id", targetJobId)
+          .maybeSingle();
+        companyIdToSet = jData?.company_id || null;
+      }
+    }
+
     const { data: session, error } = await supabase
       .from("gd_sessions")
       .insert([
-        { topic, duration_minutes: null, mode: "offline", status: "Ended" },
+        {
+          topic,
+          duration_minutes: null,
+          job_id: targetJobId,
+          company_id: companyIdToSet,
+          mode: "offline",
+          status: "Ended",
+        },
       ])
       .select()
       .single();
@@ -1061,8 +1194,8 @@ app.post("/api/gd/create-offline", requireStaff, async (req, res) => {
   }
 });
 
-// Manually add a GD result (for offline/in-person GD sessions)
-app.post("/api/gd/manual", requireStaff, async (req, res) => {
+// Manually add a GD result (for offline/in-person GD sessions) - STRICTLY ADMIN-ONLY
+app.post("/api/gd/manual", requireAdmin, async (req, res) => {
   try {
     const {
       candidate_name,
@@ -1128,7 +1261,22 @@ app.post("/api/gd/manual", requireStaff, async (req, res) => {
 });
 
 // Start GD Session
-app.post("/api/gd/:id/start", requireStaff, async (req, res) => {
+app.post("/api/gd/:id/start", requireAdminOrCorporate, async (req, res) => {
+  const { data: existing, error: fetchErr } = await supabase
+    .from("gd_sessions")
+    .select("id, company_id")
+    .eq("id", req.params.id)
+    .single();
+
+  if (fetchErr || !existing) return res.status(404).json({ error: "GD session not found" });
+
+  if (
+    req.userProfile?.role === "corporate" &&
+    existing.company_id !== req.userProfile?.company_id
+  ) {
+    return res.status(403).json({ error: "Access denied. You do not own this GD session." });
+  }
+
   const { data, error } = await supabase
     .from("gd_sessions")
     .update({ status: "Active", started_at: new Date() })
@@ -1141,7 +1289,22 @@ app.post("/api/gd/:id/start", requireStaff, async (req, res) => {
 });
 
 // End GD + trigger AI scoring
-app.post("/api/gd/:id/end", requireStaff, async (req, res) => {
+app.post("/api/gd/:id/end", requireAdminOrCorporate, async (req, res) => {
+  const { data: existing, error: fetchErr } = await supabase
+    .from("gd_sessions")
+    .select("id, company_id")
+    .eq("id", req.params.id)
+    .single();
+
+  if (fetchErr || !existing) return res.status(404).json({ error: "GD session not found" });
+
+  if (
+    req.userProfile?.role === "corporate" &&
+    existing.company_id !== req.userProfile?.company_id
+  ) {
+    return res.status(403).json({ error: "Access denied. You do not own this GD session." });
+  }
+
   await supabase
     .from("gd_sessions")
     .update({ status: "Ended", ended_at: new Date() })
@@ -1154,12 +1317,21 @@ app.post("/api/gd/:id/end", requireStaff, async (req, res) => {
 });
 
 // Get session details + participants + messages
-app.get("/api/gd/:id", requireStaff, async (req, res) => {
-  const { data: session } = await supabase
+app.get("/api/gd/:id", requireAdminOrCorporate, async (req, res) => {
+  const { data: session, error: sessErr } = await supabase
     .from("gd_sessions")
     .select("*")
     .eq("id", req.params.id)
     .single();
+
+  if (sessErr || !session) return res.status(404).json({ error: "GD session not found" });
+
+  if (
+    req.userProfile?.role === "corporate" &&
+    session.company_id !== req.userProfile?.company_id
+  ) {
+    return res.status(403).json({ error: "Access denied. You do not own this GD session." });
+  }
 
   const { data: participants } = await supabase
     .from("gd_participants")
@@ -1179,6 +1351,18 @@ app.get("/api/gd/:id", requireStaff, async (req, res) => {
 // Validate student token
 app.get("/api/gd/:id/join", async (req, res) => {
   const { token } = req.query;
+
+  const { data: session } = await supabase
+    .from("gd_sessions")
+    .select("id, status")
+    .eq("id", req.params.id)
+    .single();
+
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (session.status === "Ended") {
+    return res.status(410).json({ error: "This GD session has already ended." });
+  }
+
   const { data, error } = await supabase
     .from("gd_participants")
     .select("*")
@@ -1197,38 +1381,59 @@ app.get("/api/gd/:id/join", async (req, res) => {
 });
 
 // Shortlist selected students
-app.post("/api/gd/:id/shortlist", requireStaff, async (req, res) => {
+app.post("/api/gd/:id/shortlist", requireAdminOrCorporate, async (req, res) => {
   const { participantIds } = req.body;
+  if (!Array.isArray(participantIds) || participantIds.length === 0) {
+    return res.status(400).json({ error: "participantIds array is required" });
+  }
+
+  const { data: session } = await supabase
+    .from("gd_sessions")
+    .select("id, topic, job_id, company_id")
+    .eq("id", req.params.id)
+    .single();
+
+  if (!session) return res.status(404).json({ error: "GD session not found" });
+
+  if (
+    req.userProfile?.role === "corporate" &&
+    session.company_id !== req.userProfile?.company_id
+  ) {
+    return res.status(403).json({ error: "Access denied. You do not own this GD session." });
+  }
+
+  // Verify all participantIds belong to this specific session
+  const { data: parts, error: partErr } = await supabase
+    .from("gd_participants")
+    .select("*")
+    .eq("session_id", req.params.id)
+    .in("id", participantIds);
+
+  if (partErr || !parts || parts.length !== participantIds.length) {
+    return res.status(400).json({ error: "One or more participants do not belong to this session" });
+  }
 
   await supabase
     .from("gd_participants")
     .update({ shortlisted: true })
     .in("id", participantIds);
 
-  // Get their details and send emails
-  const { data: parts } = await supabase
-    .from("gd_participants")
-    .select("*")
-    .in("id", participantIds);
-
-  const { data: session } = await supabase
-    .from("gd_sessions")
-    .select("topic, job_id")
-    .eq("id", req.params.id)
-    .single();
-
   for (const p of parts) {
-    await sendGDShortlistEmail({
-      studentName: p.candidate_name,
-      studentEmail: p.candidate_email,
-      topic: session.topic,
-    });
+    try {
+      await sendGDShortlistEmail({
+        studentName: p.candidate_name,
+        studentEmail: p.candidate_email,
+        topic: session.topic,
+      });
+    } catch (e) {
+      console.error(`Failed to send GD shortlist email to ${p.candidate_email}:`, e);
+    }
 
-    // Pipeline sync: shortlisting from GD moves the candidate to Interview.
-    if (p.candidate_id) {
+    // Pipeline sync: shortlisting from GD moves candidate to Interview for this exact job
+    if (p.candidate_id && session.job_id) {
       await moveApplicationStage(supabase, {
         candidateId: p.candidate_id,
-        jobId: session?.job_id,
+        jobId: session.job_id,
         fromStage: "GD",
         toStage: "Interview",
       });
@@ -1238,10 +1443,10 @@ app.post("/api/gd/:id/shortlist", requireStaff, async (req, res) => {
   res.json({ success: true });
 });
 
-// Save/update Sir's manual rating for a GD participant
+// Save/update manual rating for a GD participant
 app.post(
   "/api/gd/participant/:participantId/manual-rating",
-  requireStaff,
+  requireAdminOrCorporate,
   async (req, res) => {
     try {
       const { participantId } = req.params;
@@ -1254,6 +1459,24 @@ app.post(
         comment,
       } = req.body;
 
+      // Lookup participant and parent session to verify ownership
+      const { data: participantRecord, error: pLookupErr } = await supabase
+        .from("gd_participants")
+        .select("*, gd_sessions(id, job_id, company_id)")
+        .eq("id", participantId)
+        .single();
+
+      if (pLookupErr || !participantRecord) {
+        return res.status(404).json({ error: "Participant not found" });
+      }
+
+      if (
+        req.userProfile?.role === "corporate" &&
+        participantRecord.gd_sessions?.company_id !== req.userProfile?.company_id
+      ) {
+        return res.status(403).json({ error: "Access denied. You do not own this participant's GD session." });
+      }
+
       const scoreFields = {
         confidence,
         communication,
@@ -1264,7 +1487,7 @@ app.post(
 
       // Validate each score is an integer between 1 and 5
       for (const [key, value] of Object.entries(scoreFields)) {
-        if (value === undefined || value === null) continue; // allow partial updates
+        if (value === undefined || value === null) continue;
         const num = Number(value);
         if (!Number.isInteger(num) || num < 1 || num > 5) {
           return res
@@ -1295,12 +1518,6 @@ app.post(
         return res.status(500).json({ error: error.message || error });
       }
 
-      if (!data) {
-        return res.status(404).json({ error: "Participant not found" });
-      }
-
-      // Pipeline sync: if the rated criteria average out to 3/5 or higher,
-      // auto-move the candidate from GD to Interview on the pipeline board.
       const ratedValues = [
         confidence,
         communication,
@@ -1311,18 +1528,12 @@ app.post(
         .filter((v) => v !== undefined && v !== null)
         .map(Number);
 
-      if (ratedValues.length > 0 && data.candidate_id) {
+      if (ratedValues.length > 0 && data.candidate_id && participantRecord.gd_sessions?.job_id) {
         const avg = ratedValues.reduce((a, b) => a + b, 0) / ratedValues.length;
         if (avg >= 3) {
-          const { data: session } = await supabase
-            .from("gd_sessions")
-            .select("job_id")
-            .eq("id", data.session_id)
-            .single();
-
           await moveApplicationStage(supabase, {
             candidateId: data.candidate_id,
-            jobId: session?.job_id,
+            jobId: participantRecord.gd_sessions.job_id,
             fromStage: "GD",
             toStage: "Interview",
           });
@@ -1340,6 +1551,17 @@ app.post(
 app.get("/api/gd/:id/token", async (req, res) => {
   try {
     const { token } = req.query;
+
+    const { data: session } = await supabase
+      .from("gd_sessions")
+      .select("id, status")
+      .eq("id", req.params.id)
+      .single();
+
+    if (session?.status === "Ended") {
+      return res.status(410).json({ error: "This GD session has already ended." });
+    }
+
     const { data: participant, error } = await supabase
       .from("gd_participants")
       .select("*, gd_sessions(daily_room_name, daily_room_url)")
@@ -1377,10 +1599,30 @@ app.post("/api/auth/register", async (req, res) => {
         .json({ error: "Name, email, and password are required" });
     }
 
-    const finalRole = ["recruiter", "corporate", "candidate", "admin"].includes(
-      role,
-    )
-      ? role
+    // Strict security check: Admin accounts cannot be self-registered publicly under any circumstances.
+    // Authorized administrators can create or assign Admin accounts securely via User Management.
+    const normalizedRole = typeof role === "string" ? role.trim().toLowerCase() : "";
+    if (
+      normalizedRole === "admin" ||
+      (Array.isArray(role) && role.some((r) => String(r).trim().toLowerCase() === "admin"))
+    ) {
+      return res.status(403).json({
+        error: "Admin accounts cannot be self-registered. Contact an existing system administrator.",
+      });
+    }
+
+    if (
+      normalizedRole === "recruiter" ||
+      (Array.isArray(role) && role.some((r) => String(r).trim().toLowerCase() === "recruiter"))
+    ) {
+      return res.status(400).json({
+        error: "The Recruiter role has been retired and is no longer available for registration.",
+      });
+    }
+
+    const allowedSelfRegisterRoles = ["corporate", "candidate"];
+    const finalRole = allowedSelfRegisterRoles.includes(normalizedRole)
+      ? normalizedRole
       : "candidate";
     const autoApprove = finalRole === "candidate";
 
@@ -1638,7 +1880,10 @@ app.patch("/api/auth/users/:userId", requireAdmin, async (req, res) => {
   const updates = { name, email };
 
   if (role) {
-    const validRoles = ["admin", "recruiter", "candidate", "corporate"];
+    if (role === "recruiter") {
+      return res.status(400).json({ error: "The Recruiter role has been retired and cannot be assigned." });
+    }
+    const validRoles = ["admin", "candidate", "corporate"];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ error: "Invalid role" });
     }
@@ -1693,7 +1938,10 @@ app.post("/api/auth/users/:userId/role", requireAdmin, async (req, res) => {
   const { userId } = req.params;
   const { role, company_id } = req.body;
 
-  const validRoles = ["admin", "recruiter", "candidate", "corporate"];
+  if (role === "recruiter") {
+    return res.status(400).json({ error: "The Recruiter role has been retired and cannot be assigned." });
+  }
+  const validRoles = ["admin", "candidate", "corporate"];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ error: "Invalid role" });
   }

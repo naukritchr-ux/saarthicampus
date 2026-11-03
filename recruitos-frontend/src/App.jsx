@@ -17,7 +17,7 @@ import Pipeline from "./pages/Pipeline";
 import GDAdmin from "./pages/GDAdmin";
 import GDRoom from "./pages/GDRoom";
 import AIInterview from "./pages/AIInterview";
-import ThemeToggle from "./components/ThemeToggle";
+import { Bell } from "lucide-react";
 import AptitudeTest from "./pages/AptitudeTest";
 import UserManagement from "./pages/UserManagement";
 import AuthPanel from "./components/AuthPanel";
@@ -33,7 +33,6 @@ import CandidateDB from "./pages/CandidateDB";
 import Approvals from "./pages/Approvals";
 import Documents from "./pages/Documents";
 import AdminDashboard from "./pages/AdminDashboard";
-import RecruiterDashboard from "./pages/RecruiterDashboard";
 import CompanyProfile from "./pages/CompanyProfile";
 import CandidateSearch from "./pages/CandidateSearch";
 import CorporateReports from "./pages/CorporateReports";
@@ -64,26 +63,6 @@ const pages = {
   bidportal: BidPortal,
 };
 
-// Pages available to recruiter
-const recruiterPages = {
-  recruiterDashboard: RecruiterDashboard,
-  campusdb: CampusDB,
-  corpdb: CorpDB,
-  jobs: Jobs,
-  resume: Resume,
-  aptitude: Aptitude,
-  gd: GDAdmin,
-  interview: Interview,
-  offers: Offers,
-  joining: Joining,
-  pipeline: Pipeline,
-  candidatedb: CandidateDB,
-  comm: Comm,
-  reports: Reports,          // ← ye line
-  notifications: Notifications,
-  calendartasks: CalendarTasks,
-};
-
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -100,6 +79,10 @@ export default function App() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
+    // Strictly enforce light mode application-wide
+    document.documentElement.setAttribute("data-theme", "light");
+    localStorage.setItem("theme", "light");
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setLoading(false);
@@ -139,12 +122,18 @@ export default function App() {
 
       setProfileApproved(data?.approved === true);
       const role = data?.role || "user";
+      if (role === "recruiter") {
+        await supabase.auth.signOut();
+        localStorage.removeItem("recruitos_active_page");
+        alert("The Recruiter role has been retired. Please contact an administrator to reassign your account.");
+        window.location.href = "/login";
+        return;
+      }
       setUserRole(role);
 
       let defaultLandingPage = "dashboard";
       if (role === "corporate") defaultLandingPage = "corporateDashboard";
       else if (role === "admin") defaultLandingPage = "adminDashboard";
-      else if (role === "recruiter") defaultLandingPage = "recruiterDashboard";
 
       // Preserve currently active page on session/token refresh
       setActivePage((prev) => {
@@ -243,7 +232,8 @@ export default function App() {
     return <LoginSelect />;
   }
   if (window.location.pathname === "/login/recruiter") {
-    return <AuthPanel role="recruiter" />;
+    window.location.replace("/login");
+    return null;
   }
   if (window.location.pathname === "/login/admin") {
     return <AuthPanel role="admin" />;
@@ -358,6 +348,8 @@ export default function App() {
       hiringAnalytics: CorporateReports, 
       pipeline: Pipeline,
       resume: Resume,
+      aptitude: Aptitude,
+      gd: GDAdmin,
       interview: Interview,
       offers: Offers,
       joining: Joining,
@@ -367,18 +359,11 @@ export default function App() {
     };
 
     let PageComponent;
-    const sidebarRole =
-      userRole === "corporate"
-        ? "corporate"
-        : userRole === "recruiter"
-          ? "recruiter"
-          : "admin";
+    const sidebarRole = userRole === "corporate" ? "corporate" : "admin";
 
     if (userRole === "corporate") {
       PageComponent =
         corporatePages[activePage] || corporatePages.corporateDashboard;
-    } else if (userRole === "recruiter") {
-      PageComponent = recruiterPages[activePage] || RecruiterDashboard;
     } else if (userRole === "admin") {
       PageComponent = pages[activePage] || AdminDashboard;
     } else {
@@ -430,16 +415,14 @@ export default function App() {
             />
           </div>
           <div className="top-actions">
-            <ThemeToggle />
-
             <button
               type="button"
               onClick={() => handleSetActivePage("notifications")}
               aria-label="Notifications"
               style={{
                 position: "relative",
-                background: "rgba(124,58,237,0.08)",
-                border: "none",
+                background: "var(--brand-purple-light)",
+                border: "1px solid rgba(109, 58, 232, 0.15)",
                 borderRadius: 10,
                 width: 38,
                 height: 38,
@@ -447,10 +430,10 @@ export default function App() {
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: "pointer",
-                fontSize: 18,
+                transition: "all 0.18s ease",
               }}
             >
-              🔔
+              <Bell size={18} color="var(--brand-purple)" />
               {unreadCount > 0 && (
                 <span
                   style={{

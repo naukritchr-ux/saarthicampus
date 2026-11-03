@@ -3,7 +3,8 @@ import { Pencil, Trash2, Check, X as XIcon } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { authHeaders } from "../lib/api";
 
-const ROLES = ["admin", "recruiter", "candidate", "corporate"];
+const ASSIGNABLE_ROLES = ["admin", "corporate", "candidate"];
+const FILTER_ROLES = ["admin", "corporate", "candidate", "recruiter"];
 const PAGE_SIZE = 7;
 
 function timeAgo(dateStr) {
@@ -44,7 +45,7 @@ function avatarColor(id) {
   return AVATAR_COLORS[hash];
 }
 
-const emptyNewUser = { name: "", email: "", password: "", role: "recruiter", company_id: "" };
+const emptyNewUser = { name: "", email: "", password: "", role: "corporate", company_id: "" };
 
 function iconBtnStyle(bg, color, border) {
   return {
@@ -84,7 +85,7 @@ export default function UserManagement() {
   const [addSaving, setAddSaving] = useState(false);
 
   const [editUser, setEditUser] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", email: "", role: "recruiter", company_id: "" });
+  const [editForm, setEditForm] = useState({ name: "", email: "", role: "corporate", company_id: "" });
   const [editError, setEditError] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
@@ -193,7 +194,7 @@ export default function UserManagement() {
     setEditForm({
       name: u.name || "",
       email: u.email || "",
-      role: u.role || "recruiter",
+      role: u.role || "corporate",
       company_id: u.company_id || "",
     });
     setEditError("");
@@ -394,7 +395,7 @@ export default function UserManagement() {
           style={{ padding: "8px 10px", borderRadius: 8, fontSize: 13 }}
         >
           <option>All Roles</option>
-          {ROLES.map((r) => (
+          {FILTER_ROLES.map((r) => (
             <option key={r} value={r.charAt(0).toUpperCase() + r.slice(1)}>
               {r.charAt(0).toUpperCase() + r.slice(1)}
             </option>
@@ -448,7 +449,7 @@ export default function UserManagement() {
                 </tr>
               ) : (
                 pageRows.map((u) => {
-                  const selectedRole = pendingRole[u.id] ?? u.role ?? "recruiter";
+                  const selectedRole = pendingRole[u.id] ?? u.role ?? "corporate";
                   const isDirty = pendingRole[u.id] && pendingRole[u.id] !== u.role;
                   const status = u.status === "denied" ? "Blocked" : u.approved ? "Active" : "Pending";
                   const statusColors = {
@@ -527,7 +528,12 @@ export default function UserManagement() {
                           onChange={(e) => onRoleChange(u.id, e.target.value)}
                           style={{ padding: "5px 8px", borderRadius: 6, fontSize: 13 }}
                         >
-                          {ROLES.map((r) => (
+                          {selectedRole === "recruiter" && (
+                            <option value="recruiter" disabled>
+                              Recruiter (Retired)
+                            </option>
+                          )}
+                          {ASSIGNABLE_ROLES.map((r) => (
                             <option key={r} value={r}>
                               {r.charAt(0).toUpperCase() + r.slice(1)}
                             </option>
@@ -719,7 +725,7 @@ export default function UserManagement() {
                   }}
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 6, marginTop: 4 }}
                 >
-                  {ROLES.map((r) => (
+                  {ASSIGNABLE_ROLES.map((r) => (
                     <option key={r} value={r}>
                       {r.charAt(0).toUpperCase() + r.slice(1)}
                     </option>
@@ -825,7 +831,12 @@ export default function UserManagement() {
                   onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
                   style={{ width: "100%", padding: "8px 10px", borderRadius: 6, marginTop: 4 }}
                 >
-                  {ROLES.map((r) => (
+                  {editForm.role === "recruiter" && (
+                    <option value="recruiter" disabled>
+                      Recruiter (Retired)
+                    </option>
+                  )}
+                  {ASSIGNABLE_ROLES.map((r) => (
                     <option key={r} value={r}>
                       {r.charAt(0).toUpperCase() + r.slice(1)}
                     </option>

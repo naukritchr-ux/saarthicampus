@@ -11,11 +11,11 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 );
-const { requireStaff } = createAuthMiddleware(supabase);
+const { requireStaff, requireAdminOrCorporate } = createAuthMiddleware(supabase);
 
 const MODEL = 'openai/gpt-oss-120b';
 
-router.post('/generate', requireStaff, async (req, res) => {
+router.post('/generate', requireAdminOrCorporate, async (req, res) => {
   try {
     const { job_id, difficulty, question_count } = req.body;
     const count = Math.min(Math.max(Number(question_count) || 20, 5), 50);
@@ -30,6 +30,12 @@ router.post('/generate', requireStaff, async (req, res) => {
         .eq('id', job_id)
         .single();
       if (jobErr) throw jobErr;
+
+      if (req.userProfile?.role === 'corporate') {
+        if (!req.userProfile.company_id || job.company_id !== req.userProfile.company_id) {
+          return res.status(403).json({ error: "Access denied: cannot generate tests for another company's job" });
+        }
+      }
 
       jobContext = `Job Title: ${job.title}
 Experience Level: ${job.experience || 'Not specified'}
@@ -87,12 +93,37 @@ Respond with ONLY valid JSON, no markdown, no code fences, no explanation, in ex
   }
 });
 
-// Save a generated test + email the link to a candidate (staff only)
-router.post('/send-invite', requireStaff, async (req, res) => {
+// Save a generated test + email the link to a candidate (admin and corporate)
+router.post('/send-invite', requireAdminOrCorporate, async (req, res) => {
   try {
     const { candidate_id, job_id, questions, difficulty } = req.body;
     if (!candidate_id || !questions) {
       return res.status(400).json({ error: 'candidate_id and questions are required' });
+    }
+
+    let targetJobId = job_id || null;
+    if (!targetJobId) {
+      const { data: candApp } = await supabase
+        .from('applications')
+        .select('job_id')
+        .eq('candidate_id', candidate_id)
+        .eq('stage', 'Aptitude')
+        .maybeSingle();
+      if (candApp?.job_id) targetJobId = candApp.job_id;
+    }
+
+    if (req.userProfile?.role === 'corporate') {
+      if (!targetJobId) {
+        return res.status(400).json({ error: 'job_id is required for corporate accounts' });
+      }
+      const { data: job } = await supabase
+        .from('job_profiles')
+        .select('company_id')
+        .eq('id', targetJobId)
+        .maybeSingle();
+      if (!job || job.company_id !== req.userProfile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot send invites for another company's job" });
+      }
     }
 
     const { data: candidate, error: candErr } = await supabase
@@ -101,14 +132,14 @@ router.post('/send-invite', requireStaff, async (req, res) => {
 
     const { data: test, error: testErr } = await supabase
       .from('aptitude_tests')
-      .insert([{ job_id: job_id || null, difficulty, questions }])
+      .insert([{ job_id: targetJobId, difficulty, questions }])
       .select()
       .single();
     if (testErr) throw testErr;
 
     const { data: invite, error: inviteErr } = await supabase
       .from('aptitude_invites')
-      .insert([{ test_id: test.id, candidate_id, job_id: job_id || null }])
+      .insert([{ test_id: test.id, candidate_id, job_id: targetJobId }])
       .select()
       .single();
     if (inviteErr) throw inviteErr;

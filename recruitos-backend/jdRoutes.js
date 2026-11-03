@@ -11,7 +11,7 @@ const supabase = createClient(
 );
 const { requireRole } = createAuthMiddleware(supabase);
 
-router.post('/generate', requireRole('admin', 'recruiter', 'corporate'), async (req, res) => {
+router.post('/generate', requireRole('admin', 'corporate'), async (req, res) => {
   try {
     const { prompt, company } = req.body;
     let targetCompany = company;

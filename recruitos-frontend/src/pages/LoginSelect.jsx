@@ -1,326 +1,175 @@
 import campusBg from "../assets/campus-bg.png";
 import logoImg from "../assets/saarthi-logo-transparent.png";
+import "./LoginSelect.css";
 import {
-  Briefcase,
   Building2,
   ShieldCheck,
-  ClipboardCheck,
-  ListChecks,
-  CalendarClock,
-  BarChart3,
-  LayoutDashboard,
-  ClipboardList,
+  Briefcase,
+  Search,
+  CheckSquare,
   Users,
-  UserCog,
+  BarChart3,
+  Shield,
   Settings,
   Activity,
-  Database,
-  Cpu,
-  TrendingUp,
-  Layers,
+  FileSpreadsheet,
   ArrowRight,
+  UserCheck,
 } from "lucide-react";
-
-const cards = [
-  {
-    role: "Recruiter",
-    icon: Briefcase,
-    path: "/login/recruiter",
-    ringColor: "linear-gradient(135deg, #8B5CF6, #7C3AED)",
-    buttonColor: "linear-gradient(90deg, #7C3AED, #9333EA)",
-    desc: "Post jobs, review candidates and manage your hiring pipeline.",
-    features: [
-      { icon: ClipboardCheck, label: "Post & Manage Jobs" },
-      { icon: Users, label: "Review Candidates" },
-      { icon: ListChecks, label: "Track Applications" },
-      { icon: CalendarClock, label: "Schedule Interviews" },
-      { icon: BarChart3, label: "Analytics & Reports" },
-    ],
-    featureColor: "#8B5CF6",
-  },
-  {
-    role: "Corporate",
-    icon: Building2,
-    path: "/login/corporate",
-    ringColor: "linear-gradient(135deg, #22B8CF, #0E7C99)",
-    buttonColor: "linear-gradient(90deg, #0E7C99, #22B8CF)",
-    desc: "Manage company profile, jobs, and recruitment activities.",
-    features: [
-      { icon: LayoutDashboard, label: "Company Dashboard" },
-      { icon: ClipboardList, label: "Manage Job Postings" },
-      { icon: ClipboardCheck, label: "View Applications" },
-      { icon: UserCog, label: "Team Management" },
-      { icon: BarChart3, label: "Reports & Analytics" },
-    ],
-    featureColor: "#0E7C99",
-  },
-  {
-    role: "Admin",
-    icon: ShieldCheck,
-    path: "/login/admin",
-    ringColor: "linear-gradient(135deg, #F0508B, #E11D74)",
-    buttonColor: "linear-gradient(90deg, #E11D74, #F0508B)",
-    desc: "Manage platform users, roles, permissions and system settings.",
-    features: [
-      { icon: Users, label: "User Management" },
-      { icon: ShieldCheck, label: "Role & Permissions" },
-      { icon: Settings, label: "System Settings" },
-      { icon: Activity, label: "Activity Logs" },
-      { icon: Database, label: "Data & Reports" },
-    ],
-    featureColor: "#E11D74",
-  },
-];
-
-const trustItems = [
-  { icon: ShieldCheck, title: "Secure & Compliant", sub: "Enterprise-grade security", color: "#8B5CF6" },
-  { icon: Cpu, title: "AI Powered", sub: "Smart matching & insights", color: "#22B8CF" },
-  { icon: TrendingUp, title: "Real-time Analytics", sub: "Data-driven decisions", color: "#F0508B" },
-  { icon: Layers, title: "Scalable Platform", sub: "Built for your growth", color: "#8B5CF6" },
-];
 
 export default function SaarthiCampusLanding() {
   return (
     <div
-      style={{
-        minHeight: "100vh",
-        width: "100%",
-        backgroundImage: `url(${campusBg})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center bottom",
-        backgroundRepeat: "no-repeat",
-        backgroundAttachment: "local",
-        backgroundColor: "#eeecfb",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "48px 24px",
-        boxSizing: "border-box",
-      }}
+      className="sc-page-root"
+      style={{ backgroundImage: `url(${campusBg})` }}
     >
-      <div style={{ width: "100%", maxWidth: 1280 }}>
-        {/* logo */}
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 56 }}>
+      <div className="sc-content-container">
+        {/* Top Header / Logo */}
+        <header className="sc-brand-header">
           <img
             src={logoImg}
-            alt="Saarthi Campus"
-            style={{
-              display: "block",
-              height: 72,
-              width: "auto",
-              objectFit: "contain",
-            }}
+            alt="Saarthi Campus Logo"
+            className="sc-brand-logo"
           />
-        </div>
+        </header>
 
-        {/* heading + cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0,1fr) minmax(0,2.6fr)",
-            gap: 40,
-            alignItems: "start",
-          }}
-        >
-          <div>
-            <h1 style={{ margin: 0, fontSize: 44, fontWeight: 800, lineHeight: 1.15, color: "#0f172a" }}>
-              Welcome to
-              <br />
-              <span
-                style={{
-                  background: "linear-gradient(90deg, #7C3AED, #3B82F6)",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                }}
-              >
-                Saarthi Campus
-              </span>
-            </h1>
-            <div style={{ marginTop: 16, height: 4, width: 64, borderRadius: 999, background: "linear-gradient(90deg, #7C3AED, #3B82F6)" }} />
-            <p style={{ marginTop: 24, fontSize: 16, color: "#475569", lineHeight: 1.6 }}>
+        {/* Main Hero Row: Left Welcome + Right Cards */}
+        <main className="sc-hero-row">
+          {/* Left Column: Heading, Bar, 2-line Subtitle */}
+          <section className="sc-hero-left">
+            <h1 className="sc-hero-title-black">Welcome to</h1>
+            <h1 className="sc-hero-title-purple">Saarthi Campus</h1>
+            <div className="sc-hero-bar" />
+            <p className="sc-hero-subtitle">
               Smart recruitment. Better connections.
               <br />
               One platform for all your hiring needs.
             </p>
-            <p style={{ marginTop: 32, fontSize: 15, fontWeight: 700, color: "#1e293b" }}>
-              Choose your login to continue
-            </p>
-          </div>
+          </section>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: 24,
-            }}
-          >
-            {cards.map(({ role, icon: Icon, path, ringColor, buttonColor, desc, features, featureColor }) => (
-              <div
-                key={role}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  borderRadius: 18,
-                  background: "#fff",
-                  padding: 28,
-                  boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
-                }}
+          {/* Right Column: Corporate Login & Admin Login Cards */}
+          <section className="sc-cards-deck">
+            {/* Corporate Login Card */}
+            <div className="sc-portal-card">
+              <div className="sc-portal-icon-circle sc-icon-teal">
+                <Building2 size={26} strokeWidth={2.2} />
+              </div>
+              <h2 className="sc-portal-title">Corporate Login</h2>
+              <p className="sc-portal-desc">
+                Manage company profile, jobs, and recruitment activities.
+              </p>
+
+              <ul className="sc-features-stack">
+                <li className="sc-feature-row">
+                  <Briefcase size={16} className="sc-feature-icon-teal" />
+                  <span>Post & Manage Jobs</span>
+                </li>
+                <li className="sc-feature-row">
+                  <Search size={16} className="sc-feature-icon-teal" />
+                  <span>Candidate Search & Discovery</span>
+                </li>
+                <li className="sc-feature-row">
+                  <CheckSquare size={16} className="sc-feature-icon-teal" />
+                  <span>Group Discussion Management</span>
+                </li>
+                <li className="sc-feature-row">
+                  <Users size={16} className="sc-feature-icon-teal" />
+                  <span>Aptitude & Interviews</span>
+                </li>
+                <li className="sc-feature-row">
+                  <BarChart3 size={16} className="sc-feature-icon-teal" />
+                  <span>Reports & Analytics</span>
+                </li>
+              </ul>
+
+              <a
+                href="/login/corporate"
+                className="sc-portal-button sc-btn-teal"
               >
-                <div
-                  style={{
-                    width: 64,
-                    height: 64,
-                    borderRadius: "50%",
-                    background: ringColor,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#fff",
-                    boxShadow: "0 6px 16px rgba(0,0,0,0.15)",
-                    marginBottom: 18,
-                  }}
-                >
-                  <Icon size={28} />
-                </div>
-                <h3 style={{ margin: "0 0 10px", fontSize: 19, fontWeight: 800, color: "#0f172a" }}>
-                  {role} Login
-                </h3>
-                <p style={{ margin: "0 0 18px", fontSize: 13, lineHeight: 1.6, color: "#64748b" }}>
-                  {desc}
-                </p>
-                <div style={{ borderTop: "1px dashed #e2e8f0", margin: "0 0 18px" }} />
-                <ul style={{ listStyle: "none", padding: 0, margin: "0 0 22px", flex: 1 }}>
-                  {features.map(({ icon: FIcon, label }) => (
-                    <li key={label} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13.5, color: "#334155", padding: "6px 0" }}>
-                      <FIcon size={17} color={featureColor} style={{ flexShrink: 0 }} />
-                      {label}
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={() => { window.location.href = path; }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    borderRadius: 12,
-                    border: "none",
-                    padding: "14px 16px",
-                    fontSize: 14.5,
-                    fontWeight: 700,
-                    color: "#fff",
-                    background: buttonColor,
-                    cursor: "pointer",
-                  }}
-                >
-                  Login as {role}
-                  <ArrowRight size={17} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Placement Coordinator Onboarding Banner */}
-        <div
-          style={{
-            marginTop: 32,
-            background: "rgba(255, 255, 255, 0.95)",
-            borderRadius: 16,
-            padding: "16px 24px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 16,
-            boxShadow: "0 8px 24px rgba(139, 92, 246, 0.12)",
-            border: "1px solid rgba(139, 92, 246, 0.2)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <span style={{ fontSize: 28 }}>🎓</span>
-            <div>
-              <div style={{ fontSize: 14.5, fontWeight: 800, color: "#1e1b4b" }}>
-                College Placement Coordinator (TPO)?
-              </div>
-              <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 2 }}>
-                Partner your institution with Saarthi Campus to streamline campus drives and connect graduating students with top corporate recruiters.
-              </div>
+                <span>Login as Corporate</span>
+                <ArrowRight size={16} />
+              </a>
             </div>
-          </div>
+
+            {/* Admin Login Card */}
+            <div className="sc-portal-card">
+              <div className="sc-portal-icon-circle sc-icon-pink">
+                <ShieldCheck size={26} strokeWidth={2.2} />
+              </div>
+              <h2 className="sc-portal-title">Admin Login</h2>
+              <p className="sc-portal-desc">
+                Manage platform users, roles, permissions and system settings.
+              </p>
+
+              <ul className="sc-features-stack">
+                <li className="sc-feature-row">
+                  <Users size={16} className="sc-feature-icon-pink" />
+                  <span>User Management</span>
+                </li>
+                <li className="sc-feature-row">
+                  <Shield size={16} className="sc-feature-icon-pink" />
+                  <span>Role & Permissions</span>
+                </li>
+                <li className="sc-feature-row">
+                  <Settings size={16} className="sc-feature-icon-pink" />
+                  <span>System Settings</span>
+                </li>
+                <li className="sc-feature-row">
+                  <Activity size={16} className="sc-feature-icon-pink" />
+                  <span>Activity Logs</span>
+                </li>
+                <li className="sc-feature-row">
+                  <FileSpreadsheet size={16} className="sc-feature-icon-pink" />
+                  <span>Data & Reports</span>
+                </li>
+              </ul>
+
+              <a
+                href="/login/admin"
+                className="sc-portal-button sc-btn-pink"
+              >
+                <span>Login as Admin</span>
+                <ArrowRight size={16} />
+              </a>
+            </div>
+          </section>
+        </main>
+
+        {/* Bottom Strip: Placement Coordinator Register & Student Apply */}
+        <section className="sc-bottom-pill-bar">
           <a
             href="/placement-coordinator/register"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              background: "#6327BD",
-              color: "#ffffff",
-              padding: "10px 18px",
-              borderRadius: 8,
-              fontSize: 13,
-              fontWeight: 700,
-              textDecoration: "none",
-              boxShadow: "0 4px 12px rgba(99, 39, 189, 0.25)",
-              whiteSpace: "nowrap",
-            }}
+            className="sc-bottom-link-box"
           >
-            Register as Placement Coordinator →
-          </a>
-        </div>
-
-        {/* trust strip */}
-        <div
-          style={{
-            marginTop: 56,
-            display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            borderRadius: 18,
-            background: "rgba(255,255,255,0.95)",
-            padding: "26px 28px",
-            boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
-          }}
-        >
-          {trustItems.map(({ icon: Icon, title, sub, color }, i) => (
-            <div
-              key={title}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                borderLeft: i === 0 ? "none" : "1px solid #f1f5f9",
-                paddingLeft: i === 0 ? 0 : 24,
-              }}
-            >
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 12,
-                  background: `${color}1A`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color,
-                  flexShrink: 0,
-                }}
-              >
-                <Icon size={21} />
-              </div>
-              <div>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#1e293b" }}>{title}</p>
-                <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>{sub}</p>
-              </div>
+            <div className="sc-bottom-circle-icon sc-circle-purple">
+              <Users size={22} />
             </div>
-          ))}
-        </div>
+            <div className="sc-bottom-text-group">
+              <span className="sc-bottom-title">College Placement Coordinator?</span>
+              <span className="sc-bottom-action-purple">Register Here →</span>
+            </div>
+          </a>
 
-        <p style={{ marginTop: 40, textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
-          © 2026 Saarthi Campus. All rights reserved.
-        </p>
+          <div className="sc-bottom-bar-divider" />
+
+          <a
+            href="/apply"
+            className="sc-bottom-link-box"
+          >
+            <div className="sc-bottom-circle-icon sc-circle-teal">
+              <UserCheck size={22} />
+            </div>
+            <div className="sc-bottom-text-group">
+              <span className="sc-bottom-title">Student / Candidate?</span>
+              <span className="sc-bottom-action-purple">Apply for Jobs Here →</span>
+            </div>
+          </a>
+        </section>
+
+        {/* Subtle Minimal Footer */}
+        <footer className="sc-simple-footer">
+          © 2026 Saarthi Campus. A Talent Corner HR Services Platform.
+        </footer>
       </div>
     </div>
   );

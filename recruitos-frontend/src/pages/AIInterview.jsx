@@ -168,7 +168,7 @@ export default function AIInterview() {
       <div style={pageStyle}>
         <div style={{ ...cardStyle, padding: '40px 36px', textAlign: 'center' }}>
           <div className="brand-mark" style={{ margin: '0 auto 20px' }}>S</div>
-          <h2 style={{ fontFamily: "'Fraunces',serif", fontSize: 22, marginBottom: 8, color: 'var(--text-primary)' }}>
+          <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700, fontSize: 22, marginBottom: 8, color: 'var(--text-primary)' }}>
             Hi {candidateName?.split(' ')[0] || 'there'}, ready for your AI interview?
           </h2>
           <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 4 }}>
@@ -189,7 +189,7 @@ export default function AIInterview() {
       <div style={pageStyle}>
         <div style={{ ...cardStyle, padding: '40px 36px', textAlign: 'center' }}>
           <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
-          <h2 style={{ fontFamily: "'Fraunces',serif", fontSize: 20, marginBottom: 8, color: 'var(--text-primary)' }}>
+          <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700, fontSize: 20, marginBottom: 8, color: 'var(--text-primary)' }}>
             Thank you, {candidateName?.split(' ')[0] || 'Candidate'}!
           </h2>
           <p style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>

@@ -9,10 +9,11 @@
 .corporate-app {
   min-height: 100vh;
   display: flex;
-  background: #f7f7fb;
-  color: #252238;
+  background: #F6F7FB;
+  color: #34354A;
   font-family:
-    Inter,
+    'Plus Jakarta Sans',
+    system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",

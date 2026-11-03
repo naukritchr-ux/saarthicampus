@@ -1,15 +1,15 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap");
 
 :root {
-  --canvas-bg: #e9e4f4;
-  --canvas-purple: #65428e;
-  --canvas-purple-dark: #402961;
-  --canvas-lilac: #ad91d4;
-  --canvas-cream: #fbf7ed;
-  --canvas-muted: #7e738b;
-  --canvas-ink: #251b31;
-  --canvas-green: #93ab9c;
-  --canvas-gold: #d1a75c;
+  --canvas-bg: #F6F7FB;
+  --canvas-purple: #6D3AE8;
+  --canvas-purple-dark: #5525C7;
+  --canvas-lilac: #F0EAFF;
+  --canvas-cream: #FFFFFF;
+  --canvas-muted: #62657A;
+  --canvas-ink: #17172B;
+  --canvas-green: #166534;
+  --canvas-gold: #92400E;
 }
 
 * {
@@ -23,19 +23,8 @@
   display: grid;
   place-items: center;
   padding: 30px;
-  background:
-    radial-gradient(
-      circle at 20% 20%,
-      rgba(255, 255, 255, 0.6),
-      transparent 28%
-    ),
-    linear-gradient(
-      135deg,
-      #ded5eb 0%,
-      #eee8dc 52%,
-      #cfdde0 100%
-    );
-  font-family: "Manrope", sans-serif;
+  background: #F6F7FB;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   isolation: isolate;
 }
 

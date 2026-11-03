@@ -307,22 +307,22 @@ export default function PlacementCoordinatorRegister() {
 
   const pageContainerStyle = {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #f8fafc 0%, #ede9fe 100%)",
+    background: "#F6F7FB",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     padding: "32px 16px",
-    fontFamily: "system-ui, -apple-system, sans-serif",
+    fontFamily: "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif",
   };
 
   const cardStyle = {
     background: "#ffffff",
-    borderRadius: 16,
+    borderRadius: 14,
     padding: "36px 32px",
     width: "100%",
     maxWidth: 640,
-    border: "1px solid #e2e8f0",
-    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04)",
+    border: "1px solid #E7E8F0",
+    boxShadow: "0 1px 3px rgba(23, 23, 43, 0.05), 0 4px 12px rgba(23, 23, 43, 0.03)",
   };
 
   // SUCCESS CONFIRMATION VIEW

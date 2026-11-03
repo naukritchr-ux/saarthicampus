@@ -1,0 +1,375 @@
+/* ============================================================
+   SaarthiCampus Landing Page
+   Exact Match to Reference Design
+   ============================================================ */
+
+.sc-page-root {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 28px 24px 20px;
+  box-sizing: border-box;
+  background-color: #EDE9FE;
+  background-size: cover;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.sc-content-container {
+  width: 100%;
+  max-width: 1160px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 2;
+}
+
+/* 1. Header / Logo */
+.sc-brand-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+.sc-brand-logo {
+  height: 64px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+/* 2. Main Row (Left Welcome + Right 2 Cards) */
+.sc-hero-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 36px;
+  margin-bottom: 32px;
+}
+
+/* Left Welcome Section */
+.sc-hero-left {
+  flex: 1;
+  max-width: 440px;
+}
+
+.sc-hero-title-black {
+  margin: 0;
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.12;
+  color: #17172B;
+  letter-spacing: -0.025em;
+}
+
+.sc-hero-title-purple {
+  margin: 4px 0 0;
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1.12;
+  color: #4F1FA8;
+  letter-spacing: -0.025em;
+}
+
+.sc-hero-bar {
+  margin: 16px 0 22px;
+  height: 4px;
+  width: 52px;
+  border-radius: 999px;
+  background: #4F1FA8;
+}
+
+.sc-hero-subtitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: #374151;
+  font-weight: 500;
+}
+
+/* Right 2 Cards */
+.sc-cards-deck {
+  display: flex;
+  gap: 22px;
+  flex-shrink: 0;
+}
+
+.sc-portal-card {
+  width: 310px;
+  background: #FFFFFF;
+  border-radius: 24px;
+  box-shadow: 0 12px 36px rgba(23, 23, 43, 0.08);
+  padding: 28px 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sc-portal-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 44px rgba(23, 23, 43, 0.12);
+}
+
+/* Card Icon Circle */
+.sc-portal-icon-circle {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  margin-bottom: 16px;
+}
+
+.sc-icon-teal {
+  background: linear-gradient(135deg, #22D3EE, #0284C7);
+  box-shadow: 0 6px 16px rgba(2, 132, 199, 0.3);
+}
+
+.sc-icon-pink {
+  background: linear-gradient(135deg, #FB7185, #E11D48);
+  box-shadow: 0 6px 16px rgba(225, 29, 72, 0.3);
+}
+
+.sc-portal-title {
+  margin: 0 0 8px;
+  font-size: 21px;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: -0.015em;
+}
+
+.sc-portal-desc {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #64748B;
+  min-height: 38px;
+}
+
+.sc-features-stack {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sc-feature-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 550;
+  color: #334155;
+}
+
+.sc-feature-icon-teal {
+  color: #0284C7;
+  flex-shrink: 0;
+}
+
+.sc-feature-icon-pink {
+  color: #E11D48;
+  flex-shrink: 0;
+}
+
+.sc-portal-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border-radius: 12px;
+  border: none;
+  padding: 13px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFFFFF;
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  margin-top: auto;
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sc-btn-teal {
+  background: linear-gradient(90deg, #0284C7, #06B6D4);
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.28);
+}
+
+.sc-btn-pink {
+  background: linear-gradient(90deg, #E11D48, #F43F5E);
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.28);
+}
+
+.sc-portal-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+/* 3. Bottom Two-Link Strip */
+.sc-bottom-pill-bar {
+  background: #FFFFFF;
+  border-radius: 20px;
+  box-shadow: 0 8px 28px rgba(23, 23, 43, 0.06);
+  padding: 14px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.sc-bottom-link-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-decoration: none;
+  color: inherit;
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 12px;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.sc-bottom-link-box:hover {
+  background: #FAF8FF;
+  transform: translateY(-1px);
+}
+
+.sc-bottom-circle-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sc-circle-purple {
+  background: #F0EAFF;
+  color: #5525C7;
+}
+
+.sc-circle-teal {
+  background: #E0F7FA;
+  color: #0284C7;
+}
+
+.sc-bottom-text-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sc-bottom-title {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: #17172B;
+  line-height: 1.3;
+}
+
+.sc-bottom-action-purple {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #5525C7;
+  margin-top: 2px;
+}
+
+.sc-bottom-link-box:hover .sc-bottom-action-purple {
+  text-decoration: underline;
+}
+
+.sc-bottom-bar-divider {
+  width: 1px;
+  height: 38px;
+  background: #E5E7EB;
+  flex-shrink: 0;
+}
+
+/* 4. Subtle Minimal Footer */
+.sc-simple-footer {
+  margin-top: 22px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #4F1FA8;
+  letter-spacing: 0.01em;
+}
+
+/* ============================================================
+   Responsive Adjustments
+   ============================================================ */
+
+@media (max-width: 1040px) {
+  .sc-page-root {
+    padding: 24px 18px 20px;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .sc-hero-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+  }
+
+  .sc-hero-left {
+    max-width: 100%;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .sc-hero-bar {
+    margin: 14px auto 18px;
+  }
+
+  .sc-hero-title-black,
+  .sc-hero-title-purple {
+    font-size: 38px;
+  }
+}
+
+@media (max-width: 720px) {
+  .sc-brand-header {
+    margin-bottom: 24px;
+    justify-content: center;
+  }
+
+  .sc-cards-deck {
+    flex-direction: column;
+    width: 100%;
+    align-items: center;
+  }
+
+  .sc-portal-card {
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .sc-bottom-pill-bar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px 20px;
+  }
+
+  .sc-bottom-bar-divider {
+    display: none;
+  }
+
+  .sc-hero-title-black,
+  .sc-hero-title-purple {
+    font-size: 30px;
+  }
+}

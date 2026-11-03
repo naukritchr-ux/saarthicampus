@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node --test tests/auth.test.js"
+    "test": "node --test tests/auth.test.js tests/gd_security.test.js tests/recruiter_retirement.test.js"
   },
   "keywords": [],
   "author": "",

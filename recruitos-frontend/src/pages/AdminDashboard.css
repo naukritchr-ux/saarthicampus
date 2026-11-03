@@ -1,106 +1,39 @@
+/* ============================================================
+   ADMIN DASHBOARD DESIGN TOKENS
+   Modern Corporate SaaS Light System
+============================================================ */
+
 :root {
-  --admin-bg: #f4f6fb;
-  --admin-surface: #ffffff;
-  --admin-surface-soft: #fafaff;
-  --admin-text: #202235;
-  --admin-muted: #7c8595;
-  --admin-border: #e5e8f0;
-  --admin-border-strong: #d6dae5;
+  /* Saarthi Modern Corporate SaaS Light System */
+  --admin-bg: #F6F7FB;
+  --admin-surface: #FFFFFF;
+  --admin-surface-soft: #F8F8FC;
+  --admin-text: #17172B;
+  --admin-muted: #62657A;
+  --admin-border: #E7E8F0;
+  --admin-border-strong: #D5D7E5;
 
-  --admin-purple: #6d4aff;
-  --admin-purple-dark: #5632df;
-  --admin-purple-soft: #f0ecff;
+  --admin-purple: #6D3AE8;
+  --admin-purple-dark: #5525C7;
+  --admin-purple-soft: #F0EAFF;
 
-  --admin-blue: #2c9ed8;
-  --admin-blue-soft: #e8f6ff;
-  --admin-cyan: #2c9ed8;
+  --admin-blue: #1E40AF;
+  --admin-blue-soft: #DBEAFE;
+  --admin-cyan: #0284C7;
 
-  --admin-green: #16a878;
-  --admin-green-soft: #e7f8f1;
+  --admin-green: #166534;
+  --admin-green-soft: #DCFCE7;
 
-  --admin-orange: #d88c16;
-  --admin-orange-soft: #fff4df;
+  --admin-orange: #92400E;
+  --admin-orange-soft: #FEF3C7;
 
-  --admin-red: #d34d64;
-  --admin-red-soft: #fff0f3;
+  --admin-red: #991B1B;
+  --admin-red-soft: #FEE2E2;
 
-  --admin-shadow: 0 8px 25px rgba(42, 37, 91, 0.06);
-  --admin-shadow-hover: 0 16px 35px rgba(42, 37, 91, 0.12);
+  --admin-shadow: 0 1px 3px rgba(23, 23, 43, 0.05), 0 4px 12px rgba(23, 23, 43, 0.03);
+  --admin-shadow-hover: 0 4px 18px rgba(23, 23, 43, 0.08);
 
   color-scheme: light;
-}
-
-/* OS-level dark mode (works only if the user's system/browser is in dark mode) */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --admin-bg: #11131c;
-    --admin-surface: #191c28;
-    --admin-surface-soft: #202432;
-    --admin-text: #f4f5fb;
-    --admin-muted: #9da5b8;
-    --admin-border: #2c3243;
-    --admin-border-strong: #3b4257;
-
-    --admin-purple: #a18cff;
-    --admin-purple-dark: #8f76fa;
-    --admin-purple-soft: rgba(161, 140, 255, 0.14);
-
-    --admin-blue: #4fc5ed;
-    --admin-blue-soft: rgba(79, 197, 237, 0.13);
-    --admin-cyan: #4fc5ed;
-
-    --admin-green: #48d09e;
-    --admin-green-soft: rgba(72, 208, 158, 0.13);
-
-    --admin-orange: #f5bd5c;
-    --admin-orange-soft: rgba(245, 189, 92, 0.13);
-
-    --admin-red: #f17d91;
-    --admin-red-soft: rgba(241, 125, 145, 0.13);
-
-    --admin-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-    --admin-shadow-hover: 0 18px 42px rgba(0, 0, 0, 0.34);
-
-    color-scheme: dark;
-  }
-}
-
-/* App's manual dark-mode toggle (class/attribute based).
-   IMPORTANT: change "html.dark, body.dark, [data-theme='dark']" below
-   to match whatever class/attribute your app actually adds when the
-   user clicks the dark-mode toggle. Check via DevTools -> <html>/<body> tag. */
-html.dark,
-body.dark,
-[data-theme="dark"] {
-  --admin-bg: #11131c;
-  --admin-surface: #191c28;
-  --admin-surface-soft: #202432;
-  --admin-text: #f4f5fb;
-  --admin-muted: #9da5b8;
-  --admin-border: #2c3243;
-  --admin-border-strong: #3b4257;
-
-  --admin-purple: #a18cff;
-  --admin-purple-dark: #8f76fa;
-  --admin-purple-soft: rgba(161, 140, 255, 0.14);
-
-  --admin-blue: #4fc5ed;
-  --admin-blue-soft: rgba(79, 197, 237, 0.13);
-  --admin-cyan: #4fc5ed;
-
-  --admin-green: #48d09e;
-  --admin-green-soft: rgba(72, 208, 158, 0.13);
-
-  --admin-orange: #f5bd5c;
-  --admin-orange-soft: rgba(245, 189, 92, 0.13);
-
-  --admin-red: #f17d91;
-  --admin-red-soft: rgba(241, 125, 145, 0.13);
-
-  --admin-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-  --admin-shadow-hover: 0 18px 42px rgba(0, 0, 0, 0.34);
-
-  color-scheme: dark;
 }
 
 * {
@@ -116,13 +49,24 @@ body {
   color: var(--admin-text);
   background: var(--admin-bg);
   font-family:
-    Inter,
-    ui-sans-serif,
+    'Plus Jakarta Sans',
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+}
+
+.admin-dashboard,
+.admin-dashboard * {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+.admin-dashboard h1,
+.admin-dashboard h2,
+.admin-dashboard h3,
+.admin-dashboard h4 {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
 }
 
 button,
@@ -140,8 +84,8 @@ button:focus-visible,
 select:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgba(109, 74, 255, 0.28);
-  outline-offset: 3px;
+  outline: 3px solid rgba(124, 58, 237, 0.28);
+  outline-offset: 2px;
 }
 
 .admin-dashboard {
@@ -152,15 +96,16 @@ textarea:focus-visible {
   background:
     radial-gradient(
       circle at 5% 0%,
-      rgba(109, 74, 255, 0.1),
+      rgba(124, 58, 237, 0.05),
       transparent 25%
     ),
     radial-gradient(
       circle at 96% 15%,
-      rgba(44, 158, 216, 0.08),
+      rgba(6, 182, 212, 0.04),
       transparent 22%
     ),
     var(--admin-bg);
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* Header */
@@ -177,17 +122,27 @@ textarea:focus-visible {
 .header h1 {
   margin: 0 0 8px;
   color: var(--admin-text);
-  font-size: clamp(28px, 3.4vw, 42px);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
+  font-size: clamp(26px, 3.2vw, 36px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.admin-kicker {
+  margin: 0 0 6px;
+  color: var(--admin-purple);
+  font-size: 11px;
   font-weight: 750;
-  letter-spacing: -0.065em;
-  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .header p {
   margin: 0;
   color: var(--admin-muted);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 .admin-info {
@@ -274,11 +229,12 @@ textarea:focus-visible {
   gap: 13px;
   max-width: 1500px;
   margin: 0 auto 22px;
-  padding: 17px;
+  padding: 18px 20px;
   border: 1px solid var(--admin-border);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--admin-surface);
   box-shadow: var(--admin-shadow);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .filter {
@@ -290,48 +246,268 @@ textarea:focus-visible {
   display: block;
   margin-bottom: 7px;
   color: var(--admin-muted);
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .filter select {
   width: 100%;
-  min-height: 40px;
-  padding: 0 11px;
-  border: 1px solid var(--admin-border-strong);
-  border-radius: 9px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1.5px solid var(--admin-border-strong);
+  border-radius: 10px;
   outline: none;
   color: var(--admin-text);
   background: var(--admin-surface-soft);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .filter select:focus {
   border-color: var(--admin-purple);
-  box-shadow: 0 0 0 4px rgba(109, 74, 255, 0.12);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+
+.filter.active-filter select {
+  border-color: var(--admin-purple);
+  background: var(--admin-purple-soft);
+  color: var(--admin-purple);
+  font-weight: 600;
 }
 
 .reset {
-  min-height: 40px;
-  padding: 0 16px;
-  border: 1px solid var(--admin-border-strong);
-  border-radius: 9px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1.5px solid var(--admin-border-strong);
+  border-radius: 10px;
   color: var(--admin-purple);
-  background: transparent;
-  font-size: 11px;
+  background: var(--admin-surface-soft);
+  font-size: 12px;
   font-weight: 750;
+  cursor: pointer;
   transition:
     background 180ms ease,
     color 180ms ease,
+    border-color 180ms ease,
     transform 180ms ease;
+}
+
+.reset.has-active {
+  background: var(--admin-purple);
+  color: #FFFFFF;
+  border-color: var(--admin-purple);
+  box-shadow: 0 2px 8px rgba(109, 58, 232, 0.25);
 }
 
 .reset:hover {
   color: white;
   background: var(--admin-purple);
+  border-color: var(--admin-purple);
   transform: translateY(-1px);
+}
+
+/* Searchable Filter Dropdowns */
+
+.searchable-filter {
+  position: relative;
+  user-select: none;
+}
+
+.searchable-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1.5px solid var(--admin-border-strong);
+  border-radius: 10px;
+  background: var(--admin-surface-soft);
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.searchable-trigger:hover {
+  border-color: var(--admin-purple);
+  background: var(--admin-surface);
+}
+
+.searchable-trigger:focus,
+.searchable-trigger:focus-visible {
+  outline: none;
+  border-color: var(--admin-purple);
+  box-shadow: 0 0 0 3px rgba(109, 58, 232, 0.12);
+}
+
+.searchable-filter.active-filter .searchable-trigger {
+  border-color: var(--admin-purple);
+  background: var(--admin-purple-soft);
+  color: var(--admin-purple);
+  font-weight: 600;
+}
+
+.trigger-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
+.trigger-arrow {
+  font-size: 11px;
+  color: var(--admin-muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.searchable-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  min-width: 230px;
+  z-index: 300;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(23, 23, 43, 0.14), 0 2px 8px rgba(23, 23, 43, 0.06);
+  padding: 8px;
+  animation: filterPopoverEnter 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes filterPopoverEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.searchable-input-wrap {
+  position: relative;
+  margin-bottom: 6px;
+}
+
+.searchable-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-surface-soft);
+  color: var(--admin-text);
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.searchable-input:focus {
+  border-color: var(--admin-purple);
+  background: var(--admin-surface);
+  box-shadow: 0 0 0 2px rgba(109, 58, 232, 0.1);
+}
+
+.searchable-options {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.searchable-option {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--admin-text);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.searchable-option:hover {
+  background: var(--admin-purple-soft);
+  color: var(--admin-purple);
+}
+
+.searchable-option.selected {
+  font-weight: 700;
+  background: var(--admin-purple-soft);
+  color: var(--admin-purple);
+}
+
+.searchable-empty {
+  padding: 14px 10px;
+  font-size: 12.5px;
+  color: var(--admin-muted);
+  text-align: center;
+}
+
+/* Empty States */
+
+.admin-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--admin-muted);
+  background: var(--admin-surface-soft);
+  border-radius: 12px;
+  border: 1px dashed var(--admin-border);
+  margin: 12px 0;
+}
+
+.admin-empty-state span {
+  font-size: 26px;
+  margin-bottom: 8px;
+  color: var(--admin-muted);
+}
+
+.admin-empty-state p {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--admin-muted);
+}
+
+.admin-empty-state button {
+  margin-top: 12px;
+  padding: 6px 14px;
+  background: var(--admin-purple-soft);
+  color: var(--admin-purple);
+  border: 1px solid rgba(109, 58, 232, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.admin-empty-state button:hover {
+  background: var(--admin-purple);
+  color: #FFFFFF;
+}
+
+.pipeline-empty-hint {
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--admin-muted);
+  background: var(--admin-surface-soft);
+  border-radius: 10px;
+  border: 1px dashed var(--admin-border);
+  margin-top: 14px;
 }
 
 /* KPI cards */
@@ -347,19 +523,20 @@ textarea:focus-visible {
 .kpi-card {
   position: relative;
   display: flex;
-  min-height: 132px;
+  min-height: 124px;
   align-items: flex-start;
-  gap: 13px;
+  gap: 14px;
   overflow: hidden;
-  padding: 19px;
+  padding: 18px;
   border: 1px solid var(--admin-border);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--admin-surface);
   box-shadow: var(--admin-shadow);
   transition:
     transform 180ms ease,
     box-shadow 180ms ease,
-    border-color 180ms ease;
+    border-color 180ms ease,
+    background-color 0.25s ease;
 }
 
 .kpi-card::after {
@@ -368,7 +545,7 @@ textarea:focus-visible {
   bottom: -52px;
   width: 130px;
   height: 130px;
-  border: 22px solid rgba(109, 74, 255, 0.06);
+  border: 22px solid rgba(124, 58, 237, 0.04);
   border-radius: 50%;
   content: "";
 }
@@ -376,21 +553,21 @@ textarea:focus-visible {
 .kpi-card:hover {
   border-color: var(--admin-border-strong);
   box-shadow: var(--admin-shadow-hover);
-  transform: translateY(-3px);
+  transform: translateY(-2px);
 }
 
 .kpi-symbol {
   position: relative;
   z-index: 1;
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 11px;
+  border-radius: 12px;
   color: var(--admin-purple);
   background: var(--admin-purple-soft);
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .kpi-card:nth-child(2) .kpi-symbol {
@@ -423,24 +600,26 @@ textarea:focus-visible {
   display: block;
   margin-top: 2px;
   color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 650;
-  line-height: 1.4;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .kpi-card h2 {
-  margin: 10px 0 4px;
+  margin: 8px 0 3px;
   color: var(--admin-text);
-  font-size: 29px;
-  letter-spacing: -0.07em;
-  line-height: 1;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
 }
 
 .kpi-card small {
   display: block;
   overflow: hidden;
   color: var(--admin-muted);
-  font-size: 9px;
+  font-size: 11px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -488,16 +667,16 @@ textarea:focus-visible {
 .card-heading h3 {
   margin: 0;
   color: var(--admin-text);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 750;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 
 .card-heading p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--admin-muted);
-  font-size: 10px;
-  line-height: 1.6;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 /* Monthly bar chart */
@@ -510,9 +689,9 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 14px;
   color: var(--admin-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .legend span {
@@ -1166,6 +1345,7 @@ textarea:focus-visible {
   border-radius: 14px;
   padding: 18px 20px;
   background: var(--admin-surface-soft);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .adoption-item-top {
@@ -1176,11 +1356,11 @@ textarea:focus-visible {
 }
 
 .adoption-item-top span {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   color: var(--admin-muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .adoption-symbol {
@@ -1197,18 +1377,19 @@ textarea:focus-visible {
 
 .adoption-value strong {
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--admin-text);
 }
 
 .adoption-value small {
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--admin-muted);
 }
 
 .adoption-progress {
   width: 100%;
-  height: 8px;
+  height: 7px;
   border-radius: 999px;
   background: var(--admin-border);
   overflow: hidden;
@@ -1223,7 +1404,8 @@ textarea:focus-visible {
 }
 
 .adoption-percent {
-  font-size: 11.5px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--admin-muted);
   margin-bottom: 10px;
 }
@@ -1231,7 +1413,7 @@ textarea:focus-visible {
 .adoption-breakdown {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--admin-border);
   font-size: 12px;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { getCandidatesByStage, authHeaders } from "../lib/api";
+import { authHeaders } from "../lib/api";
 
 const RATING_CRITERIA = [
   { key: "confidence", label: "Confidence" },
@@ -12,6 +12,8 @@ const RATING_CRITERIA = [
 
 export default function GDAdmin() {
   const [sessions, setSessions] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [selectedJobId, setSelectedJobId] = useState("");
   const [candidates, setCandidates] = useState([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ topic: "", duration_minutes: 30 });
@@ -22,147 +24,264 @@ export default function GDAdmin() {
   const [activeSession, setActiveSession] = useState(null);
   const [sessionData, setSessionData] = useState(null);
 
-  // NEW: which session's "Rate Participants" panel is open, and per-participant draft ratings
+  // Per-session "Rate Participants" panel state
   const [ratingSession, setRatingSession] = useState(null);
   const [ratingDrafts, setRatingDrafts] = useState({});
   const [savingRatingId, setSavingRatingId] = useState(null);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
 
+  // Fetch GD sessions (RLS automatically filters Corporate sessions to user's company)
   const fetchSessions = async () => {
-    const { data } = await supabase
-      .from("gd_sessions")
-      .select("*")
-      .order("created_at", { ascending: false });
-    setSessions(data || []);
+    try {
+      const { data, error } = await supabase
+        .from("gd_sessions")
+        .select("*, job_profiles(title)")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setSessions(data || []);
+    } catch (err) {
+      console.error("Failed to load GD sessions:", err);
+      setSessions([]);
+    }
   };
 
-  // Only candidates the Pipeline board has moved into the "GD" column show
-  // up here — keeps this module in sync with the pipeline stage.
-  const fetchCandidates = async () => {
+  // Fetch available jobs for the current role
+  const fetchJobs = async () => {
     try {
-      const data = await getCandidatesByStage("GD");
-      setCandidates(data || []);
+      const { data, error } = await supabase
+        .from("job_profiles")
+        .select("id, title, company")
+        .order("title", { ascending: true });
+      if (error) throw error;
+      setJobs(data || []);
+      if (data && data.length > 0 && !selectedJobId) {
+        setSelectedJobId(data[0].id);
+      }
     } catch (err) {
-      console.error("Failed to load candidates:", err);
+      console.error("Failed to load job profiles:", err);
+      setJobs([]);
+    }
+  };
+
+  // Fetch only candidates who applied to this exact job and are in the "GD" stage
+  const fetchCandidatesForJob = async (jobId) => {
+    if (!jobId) {
       setCandidates([]);
+      return;
+    }
+    setLoadingCandidates(true);
+    try {
+      const { data, error } = await supabase
+        .from("applications")
+        .select("job_id, candidates ( id, name, email, college_id, colleges ( name ) )")
+        .eq("stage", "GD")
+        .eq("job_id", jobId);
+
+      if (error) throw error;
+
+      const seen = new Map();
+      (data || []).forEach((row) => {
+        const c = row.candidates;
+        if (c && !seen.has(c.id)) seen.set(c.id, { ...c, job_id: row.job_id });
+      });
+      setCandidates(Array.from(seen.values()));
+    } catch (err) {
+      console.error("Failed to load candidates for job:", err);
+      setCandidates([]);
+    } finally {
+      setLoadingCandidates(false);
     }
   };
 
   useEffect(() => {
-    const load = async () => {
+    const loadInitialData = async () => {
       await fetchSessions();
-      await fetchCandidates();
+      await fetchJobs();
     };
-    load();
+    loadInitialData();
   }, []);
 
+  // Whenever selected job changes, refresh the candidate list and clear selection
+  useEffect(() => {
+    setSelectedCandidates([]);
+    if (selectedJobId) {
+      fetchCandidatesForJob(selectedJobId);
+    } else {
+      setCandidates([]);
+    }
+  }, [selectedJobId]);
+
   const fetchSessionData = async (sessionId) => {
-    const headers = await authHeaders();
-    const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}`,
-      { headers },
-    );
-    const data = await res.json();
-    setSessionData(data);
-    return data;
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}`,
+        { headers },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to load session details");
+        return null;
+      }
+      setSessionData(data);
+      return data;
+    } catch (err) {
+      console.error("fetchSessionData error:", err);
+      return null;
+    }
   };
 
   const handleCreate = async () => {
-    if (!form.topic || selectedCandidates.length === 0) {
-      alert("Please enter a topic and select at least 1 candidate");
+    if (!selectedJobId) {
+      alert("Please select a Job Profile first.");
+      return;
+    }
+    if (!form.topic.trim()) {
+      alert("Please enter a GD Topic.");
+      return;
+    }
+    if (selectedCandidates.length === 0) {
+      alert("Please select at least 1 candidate for the Group Discussion.");
       return;
     }
 
     if (sessionMode === "online") {
       if (!form.duration_minutes || isNaN(form.duration_minutes)) {
-        alert("Please enter a valid duration");
+        alert("Please enter a valid duration in minutes.");
         return;
       }
       setCreating(true);
-      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
-      const res = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL}/api/gd/create`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            topic: form.topic,
-            duration_minutes: form.duration_minutes,
-            candidates: selectedCandidates,
-          }),
-        },
-      );
-      const data = await res.json();
-      if (data.success) {
-        alert("GD Session created! Invite emails sent to all students.");
-        setForm({ topic: "", duration_minutes: 30 });
-        setSelectedCandidates([]);
-        await fetchSessions();
+      try {
+        const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
+        const res = await fetch(
+          `${import.meta.env.VITE_BACKEND_URL}/api/gd/create`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              topic: form.topic.trim(),
+              duration_minutes: form.duration_minutes,
+              job_id: selectedJobId,
+              candidates: selectedCandidates,
+            }),
+          },
+        );
+        const data = await res.json();
+        if (data.success) {
+          alert("Online GD Session created! Invite emails sent to all selected students.");
+          setForm({ topic: "", duration_minutes: 30 });
+          setSelectedCandidates([]);
+          await fetchSessions();
+        } else {
+          alert(data.error || "Failed to create GD session.");
+        }
+      } catch (err) {
+        console.error("GD create error:", err);
+        alert("Error connecting to server. Please try again.");
+      } finally {
+        setCreating(false);
       }
-      setCreating(false);
     } else {
       setCreating(true);
-      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
-      const res = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL}/api/gd/create-offline`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            topic: form.topic,
-            candidates: selectedCandidates,
-          }),
-        },
-      );
-      const data = await res.json();
-      if (data.success) {
-        alert("Offline GD session created! You can now rate participants.");
-        setForm({ topic: "", duration_minutes: 30 });
-        setSelectedCandidates([]);
-        await fetchSessions();
-        setRatingSession(data.session.id);
-        setActiveSession(data.session.id);
-        await fetchSessionData(data.session.id);
+      try {
+        const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
+        const res = await fetch(
+          `${import.meta.env.VITE_BACKEND_URL}/api/gd/create-offline`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              topic: form.topic.trim(),
+              job_id: selectedJobId,
+              candidates: selectedCandidates,
+            }),
+          },
+        );
+        const data = await res.json();
+        if (data.success) {
+          alert("Offline GD session created! You can now record manual candidate evaluations.");
+          setForm({ topic: "", duration_minutes: 30 });
+          setSelectedCandidates([]);
+          await fetchSessions();
+          setRatingSession(data.session.id);
+          setActiveSession(data.session.id);
+          await fetchSessionData(data.session.id);
+        } else {
+          alert(data.error || "Failed to create offline GD session.");
+        }
+      } catch (err) {
+        console.error("Offline GD create error:", err);
+        alert("Error connecting to server. Please try again.");
+      } finally {
+        setCreating(false);
       }
-      setCreating(false);
     }
   };
 
   const handleStart = async (sessionId) => {
-    const headers = await authHeaders();
-    await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/start`,
-      { method: "POST", headers },
-    );
-    await fetchSessions();
-    setActiveSession(sessionId);
-    await fetchSessionData(sessionId);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/start`,
+        { method: "POST", headers },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to start session");
+        return;
+      }
+      await fetchSessions();
+      setActiveSession(sessionId);
+      await fetchSessionData(sessionId);
+    } catch (err) {
+      console.error(err);
+      alert("Error starting session");
+    }
   };
 
   const handleEnd = async (sessionId) => {
-    const headers = await authHeaders();
-    await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/end`, {
-      method: "POST",
-      headers,
-    });
-    alert(
-      "GD ended! AI is scoring all participants. Check back in 30 seconds.",
-    );
-    await fetchSessions();
-    await fetchSessionData(sessionId);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/end`, {
+        method: "POST",
+        headers,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to end session");
+        return;
+      }
+      alert("GD ended! AI is scoring all participants. Check back in 30 seconds.");
+      await fetchSessions();
+      await fetchSessionData(sessionId);
+    } catch (err) {
+      console.error(err);
+      alert("Error ending session");
+    }
   };
 
   const handleShortlist = async (sessionId, participantIds) => {
-    const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
-    await fetch(
-      `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/shortlist`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ participantIds }),
-      },
-    );
-    alert("Shortlisted! Emails sent to selected students.");
-    await fetchSessionData(sessionId);
+    try {
+      const headers = { "Content-Type": "application/json", ...(await authHeaders()) };
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_URL}/api/gd/${sessionId}/shortlist`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ participantIds }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to shortlist candidates");
+        return;
+      }
+      alert("Shortlisted! Selected candidates have been moved to Interview stage on the Pipeline board.");
+      await fetchSessionData(sessionId);
+    } catch (err) {
+      console.error(err);
+      alert("Error shortlisting candidates");
+    }
   };
 
   const toggleCandidate = (c) => {
@@ -173,7 +292,6 @@ export default function GDAdmin() {
     );
   };
 
-  // NEW: toggle the "Rate Participants" collapsible section for a session
   const handleToggleRating = async (sessionId) => {
     if (ratingSession === sessionId) {
       setRatingSession(null);
@@ -186,7 +304,6 @@ export default function GDAdmin() {
     }
   };
 
-  // NEW: get current draft for a participant, defaulting to saved DB values
   const getOrInitDraft = (p) => {
     return (
       ratingDrafts[p.id] || {
@@ -200,7 +317,6 @@ export default function GDAdmin() {
     );
   };
 
-  // NEW: update a single field in a participant's draft
   const setRatingDraft = (p, key, value) => {
     setRatingDrafts((prev) => ({
       ...prev,
@@ -208,7 +324,6 @@ export default function GDAdmin() {
     }));
   };
 
-  // NEW: save a participant's manual rating to the backend
   const saveRating = async (sessionId, p) => {
     const draft = getOrInitDraft(p);
     setSavingRatingId(p.id);
@@ -236,11 +351,11 @@ export default function GDAdmin() {
     } catch (err) {
       console.error(err);
       alert("Failed to save rating");
+    } finally {
+      setSavingRatingId(null);
     }
-    setSavingRatingId(null);
   };
 
-  // NEW: 5-star selector for one criterion
   const StarRow = ({ p, critKey }) => {
     const draft = getOrInitDraft(p);
     const value = draft[critKey] || 0;
@@ -271,11 +386,11 @@ export default function GDAdmin() {
       <div className="page-head">
         <div>
           <h1>Group Discussion</h1>
-          <p>Create sessions, invite students, AI auto-scores after GD ends</p>
+          <p>Schedule online and offline GD rounds, evaluate candidates, and sync shortlisted talent directly to the Interview pipeline stage.</p>
         </div>
       </div>
 
-      {/* Create Session */}
+      {/* Create Session Card */}
       <div className="panel" style={{ position: "relative", zIndex: 10 }}>
         <div className="panel-title">Create New GD Session</div>
 
@@ -294,11 +409,38 @@ export default function GDAdmin() {
           </button>
         </div>
 
-        <div className="panel-sub">
+        <div className="panel-sub" style={{ marginBottom: 16 }}>
           {sessionMode === "online"
-            ? "Students will receive an email with their personal video call join link"
-            : "No emails sent — record ratings directly for an in-person discussion that already happened"}
+            ? "Students receive an automated email with their personal join link to the video room."
+            : "Directly records scores for discussions that took place in person. No video rooms or candidate emails are sent."}
         </div>
+
+        {/* Step 1: Mandatory Job Selection */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+            Target Job Profile <span style={{ color: "var(--danger)" }}>*</span>
+          </label>
+          {jobs.length === 0 ? (
+            <div style={{ padding: 12, borderRadius: 8, background: "var(--bg-surface-2)", color: "var(--text-muted)", fontSize: 12 }}>
+              No active job profiles found. Please create a job profile before scheduling a Group Discussion.
+            </div>
+          ) : (
+            <select
+              className="search-box"
+              style={{ width: "100%", padding: "8px 12px", borderRadius: 8 }}
+              value={selectedJobId}
+              onChange={(e) => setSelectedJobId(e.target.value)}
+            >
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.title} {j.company ? `(${j.company})` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Step 2: Topic & Duration */}
         <div
           style={{
             display: "grid",
@@ -308,18 +450,18 @@ export default function GDAdmin() {
           }}
         >
           <div className="field" style={{ margin: 0 }}>
-            <label>GD Topic</label>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>GD Topic <span style={{ color: "var(--danger)" }}>*</span></label>
             <input
               className="search-box"
               style={{ width: "100%" }}
-              placeholder="e.g. AI vs Human Intelligence"
+              placeholder="e.g. AI vs Human Intelligence in 2026"
               value={form.topic}
               onChange={(e) => setForm({ ...form, topic: e.target.value })}
             />
           </div>
           {sessionMode === "online" && (
             <div className="field" style={{ margin: 0 }}>
-              <label>Duration (minutes)</label>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>Duration (minutes)</label>
               <input
                 type="number"
                 className="search-box"
@@ -337,18 +479,22 @@ export default function GDAdmin() {
           )}
         </div>
 
+        {/* Step 3: Candidate Selection Scoped to Selected Job */}
         <div style={{ marginBottom: 16, position: "relative" }}>
           <div
             style={{
               fontSize: 11.5,
               color: "var(--text-muted)",
               marginBottom: 8,
+              display: "flex",
+              justifyContent: "space-between",
             }}
           >
-            Select Candidates ({selectedCandidates.length} selected)
+            <span>Eligible Candidates in "GD" Stage ({selectedCandidates.length} selected)</span>
+            {loadingCandidates && <span>Loading candidates...</span>}
           </div>
 
-          {/* Input box with selected candidates shown as chips */}
+          {/* Chips container */}
           <div
             style={{
               display: "flex",
@@ -406,17 +552,19 @@ export default function GDAdmin() {
               placeholder={
                 selectedCandidates.length
                   ? "Add more…"
-                  : "Click to select candidates…"
+                  : candidates.length === 0
+                  ? "No candidates currently in GD stage for this job"
+                  : "Click to select eligible candidates…"
               }
               value={candidateSearch}
               onChange={(e) => setCandidateSearch(e.target.value)}
               onFocus={() => setShowDropdown(true)}
-              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
             />
           </div>
 
-          {/* Dropdown suggestions — show on focus or while typing */}
-          {showDropdown && (
+          {/* Candidates dropdown list */}
+          {showDropdown && candidates.length > 0 && (
             <div
               style={{
                 position: "absolute",
@@ -444,7 +592,7 @@ export default function GDAdmin() {
                         ?.toLowerCase()
                         .includes(candidateSearch.toLowerCase())),
                 )
-                .slice(0, 20)
+                .slice(0, 30)
                 .map((c) => (
                   <div
                     key={c.id}
@@ -477,51 +625,36 @@ export default function GDAdmin() {
                         {c.name}
                       </div>
                       <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
-                        {c.colleges?.name || "No college set"} ·{" "}
+                        {c.colleges?.name || "No college specified"} ·{" "}
                         {c.email || "No email"}
                       </div>
                     </div>
                   </div>
                 ))}
-              {candidates.filter(
-                (c) =>
-                  !selectedCandidates.find((x) => x.id === c.id) &&
-                  (c.name
-                    ?.toLowerCase()
-                    .includes(candidateSearch.toLowerCase()) ||
-                    c.colleges?.name
-                      ?.toLowerCase()
-                      .includes(candidateSearch.toLowerCase())),
-              ).length === 0 && (
-                <div
-                  style={{
-                    padding: 12,
-                    textAlign: "center",
-                    color: "var(--text-muted)",
-                    fontSize: 12,
-                  }}
-                >
-                  No candidates found
-                </div>
-              )}
+            </div>
+          )}
+
+          {candidates.length === 0 && selectedJobId && !loadingCandidates && (
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>
+              No candidates are currently in the <strong>GD</strong> stage for this job. Move candidates to GD on the Candidate Pipeline board to schedule them.
             </div>
           )}
         </div>
 
-        <button className="btn-gold" onClick={handleCreate} disabled={creating}>
+        <button className="btn-gold" onClick={handleCreate} disabled={creating || !selectedJobId}>
           {creating
             ? sessionMode === "online"
               ? "Creating & Sending Emails..."
               : "Creating Session..."
             : sessionMode === "online"
-              ? "+ Create GD Session"
-              : "+ Create Offline Session & Rate Now"}
+              ? "+ Create Online GD Session"
+              : "+ Create Offline GD & Rate Now"}
         </button>
       </div>
 
       {/* Sessions List */}
       <div className="panel">
-        <div className="panel-title">GD Sessions</div>
+        <div className="panel-title">Your Group Discussion Sessions</div>
         {sessions.length === 0 ? (
           <div
             style={{
@@ -530,7 +663,7 @@ export default function GDAdmin() {
               color: "var(--text-muted)",
             }}
           >
-            No sessions yet
+            No GD sessions scheduled yet.
           </div>
         ) : (
           sessions.map((session) => (
@@ -556,9 +689,24 @@ export default function GDAdmin() {
                       fontWeight: 600,
                       color: "var(--text-primary)",
                       fontSize: 14,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
                     }}
                   >
-                    {session.topic}
+                    <span>{session.topic}</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        padding: "2px 8px",
+                        borderRadius: 6,
+                        background: session.mode === "offline" ? "rgba(100,116,139,0.12)" : "rgba(14,165,233,0.12)",
+                        color: session.mode === "offline" ? "#475569" : "#0284c7",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {session.mode === "offline" ? "🤝 Offline" : "🎥 Online"}
+                    </span>
                   </div>
                   <div
                     style={{
@@ -567,8 +715,9 @@ export default function GDAdmin() {
                       marginTop: 3,
                     }}
                   >
-                    {session.duration_minutes} mins · Created{" "}
-                    {new Date(session.created_at).toLocaleDateString()}
+                    {session.job_profiles?.title ? `Job: ${session.job_profiles.title} · ` : ""}
+                    {session.duration_minutes ? `${session.duration_minutes} mins · ` : ""}
+                    Created {new Date(session.created_at).toLocaleDateString()}
                   </div>
                 </div>
                 <div
@@ -607,7 +756,6 @@ export default function GDAdmin() {
                       End GD
                     </button>
                   )}
-                  {/* NEW: Rate Participants toggle — available regardless of session status */}
                   <button
                     className="btn-outline"
                     style={{
@@ -622,10 +770,7 @@ export default function GDAdmin() {
                     }}
                     onClick={() => handleToggleRating(session.id)}
                   >
-                    ★{" "}
-                    {ratingSession === session.id
-                      ? "Hide Rating"
-                      : "Rate Participants"}
+                    ★ {ratingSession === session.id ? "Hide Evaluation" : "Rate Candidates"}
                   </button>
                   <button
                     className="btn-outline"
@@ -640,15 +785,15 @@ export default function GDAdmin() {
                 </div>
               </div>
 
-              {/* NEW: Sir's Rating collapsible panel */}
+              {/* Evaluation Panel */}
               {ratingSession === session.id && (
                 <div
                   style={{
                     marginTop: 16,
-                    background: "rgba(0,0,0,0.22)",
+                    background: "var(--bg-surface-2)",
                     borderRadius: 10,
                     padding: 16,
-                    border: "1px solid rgba(245,158,11,0.3)",
+                    border: "1px solid var(--border-default)",
                   }}
                 >
                   <div
@@ -659,7 +804,7 @@ export default function GDAdmin() {
                       color: "var(--text-primary)",
                     }}
                   >
-                    Manual Evaluation
+                    Manual Evaluation (1 to 5 Stars)
                   </div>
                   <div
                     style={{
@@ -668,8 +813,7 @@ export default function GDAdmin() {
                       marginBottom: 14,
                     }}
                   >
-                    Rate each participant on the criteria below. Ratings can be
-                    submitted before, during, or after the GD.
+                    Rate participants on the 5 key criteria. An average rating of 3.0 or higher automatically advances the candidate's application to the <strong>Interview</strong> stage on the hiring pipeline board.
                   </div>
 
                   {!sessionData || activeSession !== session.id ? (
@@ -683,8 +827,7 @@ export default function GDAdmin() {
                     >
                       Loading participants…
                     </div>
-                  ) : !sessionData.participants ||
-                    sessionData.participants.length === 0 ? (
+                  ) : !sessionData.participants || sessionData.participants.length === 0 ? (
                     <div
                       style={{
                         textAlign: "center",
@@ -693,7 +836,7 @@ export default function GDAdmin() {
                         fontSize: 12,
                       }}
                     >
-                      No participants found
+                      No participants registered in this session.
                     </div>
                   ) : (
                     sessionData.participants.map((p) => {
@@ -714,7 +857,7 @@ export default function GDAdmin() {
                               marginBottom: 10,
                             }}
                           >
-                            {p.candidate_name}
+                            {p.candidate_name} ({p.candidate_email || "No email"})
                           </div>
 
                           <div
@@ -744,7 +887,7 @@ export default function GDAdmin() {
 
                           <textarea
                             className="search-box"
-                            placeholder="Comment (optional)"
+                            placeholder="Optional evaluation comments..."
                             value={draft.comment}
                             onChange={(e) =>
                               setRatingDraft(p, "comment", e.target.value)
@@ -764,9 +907,7 @@ export default function GDAdmin() {
                             disabled={savingRatingId === p.id}
                             onClick={() => saveRating(session.id, p)}
                           >
-                            {savingRatingId === p.id
-                              ? "Saving..."
-                              : "Save Rating"}
+                            {savingRatingId === p.id ? "Saving..." : "Save Rating"}
                           </button>
                         </div>
                       );
@@ -775,7 +916,7 @@ export default function GDAdmin() {
                 </div>
               )}
 
-              {/* Results panel */}
+              {/* AI & Results Panel */}
               {activeSession === session.id && sessionData && (
                 <div
                   style={{
@@ -793,9 +934,9 @@ export default function GDAdmin() {
                       color: "var(--text-primary)",
                     }}
                   >
-                    AI Scores{" "}
-                    {session.status !== "Ended"
-                      ? "(available after GD ends)"
+                    Candidate Scores & Shortlist{" "}
+                    {session.status !== "Ended" && session.mode === "online"
+                      ? "(AI scores will generate once the session is marked Ended)"
                       : ""}
                   </div>
                   {sessionData.participants &&
@@ -855,17 +996,13 @@ export default function GDAdmin() {
                         {p.shortlisted ? (
                           <span className="badge green">Shortlisted</span>
                         ) : (
-                          p.ai_score && (
-                            <button
-                              className="btn-gold"
-                              style={{ fontSize: 11, padding: "5px 10px" }}
-                              onClick={() =>
-                                handleShortlist(session.id, [p.id])
-                              }
-                            >
-                              Shortlist
-                            </button>
-                          )
+                          <button
+                            className="btn-gold"
+                            style={{ fontSize: 11, padding: "5px 10px" }}
+                            onClick={() => handleShortlist(session.id, [p.id])}
+                          >
+                            Shortlist
+                          </button>
                         )}
                       </div>
                     ))}

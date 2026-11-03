@@ -95,7 +95,7 @@ export default function AptitudeTest() {
       <div style={pageStyle}>
         <div style={{ ...cardStyle, padding: '40px 36px', textAlign: 'center' }}>
           <div className="brand-mark" style={{ margin: '0 auto 20px' }}>R</div>
-          <h2 style={{ fontFamily: "'Fraunces',serif", fontSize: 21, marginBottom: 8, color: 'var(--text-primary)' }}>
+          <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700, fontSize: 21, marginBottom: 8, color: 'var(--text-primary)' }}>
             Hi {candidateName?.split(' ')[0]}, ready for your aptitude test?
           </h2>
           <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '16px 0 28px', lineHeight: 1.6 }}>
@@ -113,7 +113,7 @@ export default function AptitudeTest() {
       <div style={pageStyle}>
         <div style={{ ...cardStyle, padding: '40px 36px', textAlign: 'center' }}>
           <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
-          <h2 style={{ fontFamily: "'Fraunces',serif", fontSize: 20, marginBottom: 8, color: 'var(--text-primary)' }}>
+          <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700, fontSize: 20, marginBottom: 8, color: 'var(--text-primary)' }}>
             Thanks, {candidateName?.split(' ')[0]}!
           </h2>
           <p style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>

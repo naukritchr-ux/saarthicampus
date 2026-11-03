@@ -347,9 +347,9 @@ test("Express Middleware Integration Tests", async (t) => {
     "u-corporate": { id: "u-corporate", role: "corporate", company_id: "comp-1", approved: true },
     "u-corp-unassoc": { id: "u-corp-unassoc", role: "corporate", company_id: "comp-2", approved: true },
     "u-candidate": { id: "u-candidate", role: "candidate", candidate_id: "cand-1", approved: true },
-    "u-pending": { id: "u-pending", role: "recruiter", approved: false },
-    "u-null-approved": { id: "u-null-approved", role: "recruiter", approved: null },
-    "u-undef-approved": { id: "u-undef-approved", role: "recruiter" },
+    "u-pending": { id: "u-pending", role: "candidate", approved: false },
+    "u-null-approved": { id: "u-null-approved", role: "candidate", approved: null },
+    "u-undef-approved": { id: "u-undef-approved", role: "candidate" },
   };
 
   const mockSupabase = createMockSupabase({ users: mockUsers, profiles: mockProfiles });
@@ -853,12 +853,13 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.equal(candRes.status, 403);
   });
 
-  await t.test("7. requireStaff permits admin and recruiter, rejects corporate and candidate", async () => {
+  await t.test("7. requireStaff permits admin, and rejects retired recruiter, corporate and candidate", async () => {
     const adminRes = await apiGet("/staff-only", { authorization: "Bearer admin-jwt" });
     assert.equal(adminRes.status, 200);
 
     const recruiterRes = await apiGet("/staff-only", { authorization: "Bearer recruiter-jwt" });
-    assert.equal(recruiterRes.status, 200);
+    assert.equal(recruiterRes.status, 403);
+    assert.match(recruiterRes.body.error, /retired/i);
 
     const corpRes = await apiGet("/staff-only", { authorization: "Bearer corporate-jwt" });
     assert.equal(corpRes.status, 403);
@@ -888,10 +889,15 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.equal(ownRes.status, 200);
     assert.equal(ownRes.body.passportFor, "cand-1");
 
-    // staff member can view cand-2
-    const staffRes = await apiGet("/passport/cand-2", { authorization: "Bearer recruiter-jwt" });
+    // Admin can view cand-2
+    const staffRes = await apiGet("/passport/cand-2", { authorization: "Bearer admin-jwt" });
     assert.equal(staffRes.status, 200);
     assert.equal(staffRes.body.passportFor, "cand-2");
+
+    // Recruiter is rejected (retired)
+    const recRes = await apiGet("/passport/cand-2", { authorization: "Bearer recruiter-jwt" });
+    assert.equal(recRes.status, 403);
+    assert.match(recRes.body.error, /retired/i);
   });
 
   await t.test("10. Fail-closed account approval: approved=null and approved=undefined are rejected with 403", async () => {
@@ -904,7 +910,7 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.match(undefRes.body.error, /pending admin approval/i);
   });
 
-  await t.test("11. POST /api/ai-interview/send-invite requires staff role", async () => {
+  await t.test("11. POST /api/ai-interview/send-invite requires staff/admin role and rejects recruiter", async () => {
     const noAuth = await apiPost("/api/ai-interview/send-invite", { candidate_id: "c1", job_id: "j1" });
     assert.equal(noAuth.status, 401);
 
@@ -914,18 +920,26 @@ test("Express Middleware Integration Tests", async (t) => {
     const cand = await apiPost("/api/ai-interview/send-invite", { candidate_id: "c1", job_id: "j1" }, { authorization: "Bearer candidate-jwt" });
     assert.equal(cand.status, 403);
 
-    const staff = await apiPost("/api/ai-interview/send-invite", { candidate_id: "c1", job_id: "j1" }, { authorization: "Bearer recruiter-jwt" });
+    const rec = await apiPost("/api/ai-interview/send-invite", { candidate_id: "c1", job_id: "j1" }, { authorization: "Bearer recruiter-jwt" });
+    assert.equal(rec.status, 403);
+    assert.match(rec.body.error, /retired/i);
+
+    const staff = await apiPost("/api/ai-interview/send-invite", { candidate_id: "c1", job_id: "j1" }, { authorization: "Bearer admin-jwt" });
     assert.equal(staff.status, 200);
   });
 
-  await t.test("12. POST /api/aptitude/generate and send-invite require staff role", async () => {
+  await t.test("12. POST /api/aptitude/generate and send-invite require staff/admin role and reject recruiter", async () => {
     const noAuthGen = await apiPost("/api/aptitude/generate", { job_id: "j1" });
     assert.equal(noAuthGen.status, 401);
 
     const corpGen = await apiPost("/api/aptitude/generate", { job_id: "j1" }, { authorization: "Bearer corporate-jwt" });
     assert.equal(corpGen.status, 403);
 
-    const staffGen = await apiPost("/api/aptitude/generate", { job_id: "j1" }, { authorization: "Bearer recruiter-jwt" });
+    const recGen = await apiPost("/api/aptitude/generate", { job_id: "j1" }, { authorization: "Bearer recruiter-jwt" });
+    assert.equal(recGen.status, 403);
+    assert.match(recGen.body.error, /retired/i);
+
+    const staffGen = await apiPost("/api/aptitude/generate", { job_id: "j1" }, { authorization: "Bearer admin-jwt" });
     assert.equal(staffGen.status, 200);
 
     const noAuthInvite = await apiPost("/api/aptitude/send-invite", { candidate_id: "c1" });
@@ -935,17 +949,21 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.equal(staffInvite.status, 200);
   });
 
-  await t.test("13. POST /api/jd/generate permits staff and corporate, denies candidates", async () => {
+  await t.test("13. POST /api/jd/generate permits admin and corporate, denies candidates and retired recruiter", async () => {
     const noAuth = await apiPost("/api/jd/generate", { prompt: "React developer" });
     assert.equal(noAuth.status, 401);
 
     const cand = await apiPost("/api/jd/generate", { prompt: "React developer" }, { authorization: "Bearer candidate-jwt" });
     assert.equal(cand.status, 403);
 
+    const rec = await apiPost("/api/jd/generate", { prompt: "React developer" }, { authorization: "Bearer recruiter-jwt" });
+    assert.equal(rec.status, 403);
+    assert.match(rec.body.error, /retired/i);
+
     const corp = await apiPost("/api/jd/generate", { prompt: "React developer" }, { authorization: "Bearer corporate-jwt" });
     assert.equal(corp.status, 200);
 
-    const staff = await apiPost("/api/jd/generate", { prompt: "React developer" }, { authorization: "Bearer recruiter-jwt" });
+    const staff = await apiPost("/api/jd/generate", { prompt: "React developer" }, { authorization: "Bearer admin-jwt" });
     assert.equal(staff.status, 200);
   });
 
@@ -976,10 +994,15 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.equal(unassocRes.status, 403);
     assert.match(unassocRes.body.error, /not associated with your company/i);
 
-    // Staff user can view any candidate passport and sees cross-company records
-    const staffRes = await apiGet("/candidate/cand-1/passport", { authorization: "Bearer recruiter-jwt" });
+    // Admin user can view any candidate passport and sees cross-company records
+    const staffRes = await apiGet("/candidate/cand-1/passport", { authorization: "Bearer admin-jwt" });
     assert.equal(staffRes.status, 200);
     assert.equal(staffRes.body.applications.length, 2);
+
+    // Recruiter is rejected (retired)
+    const recRes = await apiGet("/candidate/cand-1/passport", { authorization: "Bearer recruiter-jwt" });
+    assert.equal(recRes.status, 403);
+    assert.match(recRes.body.error, /retired/i);
   });
 
   await t.test("16. AI Interview start validates matching application", async () => {
@@ -1197,14 +1220,22 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.equal(corpSuccess.status, 200);
     assert.equal(corpSuccess.body.application.offer_letter_status, "Submitted");
 
-    // 10. Staff user allowed to update application document
+    // 10. Admin allowed to update application document; Recruiter is rejected (retired)
     const staffSuccess = await apiPatch(
+      "/api/applications/app-1/document",
+      { docKey: "marksheet", fileUrl: "https://myproject.supabase.co/storage/v1/object/public/candidate-documents/app-1_marksheet_1700000000000_marks.pdf" },
+      { authorization: "Bearer admin-jwt" }
+    );
+    assert.equal(staffSuccess.status, 200);
+    assert.equal(staffSuccess.body.application.marksheet_status, "Submitted");
+
+    const recFailed = await apiPatch(
       "/api/applications/app-1/document",
       { docKey: "marksheet", fileUrl: "https://myproject.supabase.co/storage/v1/object/public/candidate-documents/app-1_marksheet_1700000000000_marks.pdf" },
       { authorization: "Bearer recruiter-jwt" }
     );
-    assert.equal(staffSuccess.status, 200);
-    assert.equal(staffSuccess.body.application.marksheet_status, "Submitted");
+    assert.equal(recFailed.status, 403);
+    assert.match(recFailed.body.error, /retired/i);
   });
 
   await t.test("21. Private document authorization: prefix fallback removed, exact match required", async () => {
@@ -1344,30 +1375,38 @@ test("Express Middleware Integration Tests", async (t) => {
     assert.match(savedCandResume.body.signedUrl, /token=corp-signed/);
   });
 
-  await t.test("25. Recruiter operational access is fully retained for all documents and resumes", async () => {
-    // 1. Recruiter can access resume in resumes
+  await t.test("25. Recruiter role is retired and rejected from document access; Admin retains operational access", async () => {
+    // 1. Admin can access resume in resumes
+    const adminResume = await apiGet(
+      "/api/documents/signed-url?bucket=resumes&path=cand-2_resume.pdf",
+      { authorization: "Bearer admin-jwt" }
+    );
+    assert.equal(adminResume.status, 200);
+    assert.match(adminResume.body.signedUrl, /token=mock-signed/);
+
+    // 2. Admin can access photo in candidate-photos
+    const adminPhoto = await apiGet(
+      "/api/documents/signed-url?bucket=candidate-photos&path=cand-2_photo.jpg",
+      { authorization: "Bearer admin-jwt" }
+    );
+    assert.equal(adminPhoto.status, 200);
+    assert.match(adminPhoto.body.signedUrl, /token=mock-signed/);
+
+    // 3. Admin can access candidate verification document
+    const adminDoc = await apiGet(
+      "/api/documents/signed-url?bucket=candidate-documents&path=app-1_marksheet_1700000000000_marks.pdf",
+      { authorization: "Bearer admin-jwt" }
+    );
+    assert.equal(adminDoc.status, 200);
+    assert.match(adminDoc.body.signedUrl, /token=mock-signed/);
+
+    // 4. Recruiter is rejected with 403 (retired role)
     const recResume = await apiGet(
       "/api/documents/signed-url?bucket=resumes&path=cand-2_resume.pdf",
       { authorization: "Bearer recruiter-jwt" }
     );
-    assert.equal(recResume.status, 200);
-    assert.match(recResume.body.signedUrl, /token=mock-signed/);
-
-    // 2. Recruiter can access photo in candidate-photos
-    const recPhoto = await apiGet(
-      "/api/documents/signed-url?bucket=candidate-photos&path=cand-2_photo.jpg",
-      { authorization: "Bearer recruiter-jwt" }
-    );
-    assert.equal(recPhoto.status, 200);
-    assert.match(recPhoto.body.signedUrl, /token=mock-signed/);
-
-    // 3. Recruiter can access candidate verification document
-    const recDoc = await apiGet(
-      "/api/documents/signed-url?bucket=candidate-documents&path=app-1_marksheet_1700000000000_marks.pdf",
-      { authorization: "Bearer recruiter-jwt" }
-    );
-    assert.equal(recDoc.status, 200);
-    assert.match(recDoc.body.signedUrl, /token=mock-signed/);
+    assert.equal(recResume.status, 403);
+    assert.match(recResume.body.error, /retired/i);
   });
 
   await t.test("26. save_candidate_with_quota RPC verification and graceful fallback to in-process lock", async () => {
@@ -1566,7 +1605,11 @@ test("Corporate Company Linking and Job Isolation Tests (Scenarios 1-11)", async
       return res.json(filtered);
     }
 
-    if (["admin", "recruiter", "manager"].includes(profile.role)) {
+    if (profile.role === "recruiter") {
+      return res.status(403).json({ error: "The Recruiter role has been retired. Please contact an administrator to reassign your account." });
+    }
+
+    if (["admin", "manager"].includes(profile.role)) {
       return res.json(jobsStore);
     }
 
@@ -1951,12 +1994,17 @@ test("Corporate Company Linking and Job Isolation Tests (Scenarios 1-11)", async
     assert.equal(chemJob.company_id, CHEM_COMPANY_ID);
   });
 
-  // Scenario 11: Non-corporate roles retain their intended existing permissions
-  await t.test("Scenario 11: Non-corporate roles retain their intended existing permissions", async () => {
-    // Recruiter (staff) can view jobs across companies
+  // Scenario 11: Admin retains job oversight; recruiter is rejected
+  await t.test("Scenario 11: Admin retains job oversight; recruiter is rejected", async () => {
+    // Admin can view jobs across companies
+    const adminJobs = await api("/api/jobs", { headers: { authorization: "Bearer admin-jwt" } });
+    assert.equal(adminJobs.status, 200);
+    assert.ok(adminJobs.body.length >= 4);
+
+    // Recruiter is rejected (retired)
     const recJobs = await api("/api/jobs", { headers: { authorization: "Bearer recruiter-jwt" } });
-    assert.equal(recJobs.status, 200);
-    assert.ok(recJobs.body.length >= 4);
+    assert.equal(recJobs.status, 403);
+    assert.match(recJobs.body.error, /retired/i);
 
     // Candidate cannot access protected jobs listing
     const candJobs = await api("/api/jobs", { headers: { authorization: "Bearer candidate-jwt" } });
@@ -2364,14 +2412,22 @@ test("Placement Coordinator Registration & Admin Review Tests", async (t) => {
     });
     assert.equal(subRes.status, 200);
 
+    // Admin can view registrations
     const staffRes = await api("/api/placement-coordinators/registrations", {
-      headers: { authorization: "Bearer recruiter-jwt" },
+      headers: { authorization: "Bearer admin-jwt" },
     });
     assert.equal(staffRes.status, 200);
     assert.ok(Array.isArray(staffRes.body));
     const shardaReg = staffRes.body.find((r) => r.official_email === "rajiv.sen@sharda.ac.in");
     assert.ok(shardaReg);
     assert.equal(shardaReg.suggested_college?.id, "col-sharda", "Must detect matching existing college");
+
+    // Recruiter is rejected (retired)
+    const recRes = await api("/api/placement-coordinators/registrations", {
+      headers: { authorization: "Bearer recruiter-jwt" },
+    });
+    assert.equal(recRes.status, 403);
+    assert.match(recRes.body.error, /retired/i);
   });
 
   // 8. Admin approves registration with existing college match (no duplicate college created)

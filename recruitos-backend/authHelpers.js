@@ -71,6 +71,12 @@ function createAuthMiddleware(supabase) {
       });
     }
 
+    if (profile.role === 'recruiter') {
+      return res.status(403).json({
+        error: 'The Recruiter role has been retired. Please contact an administrator to reassign your account.',
+      });
+    }
+
     if (profile.approved !== true) {
       return res.status(403).json({
         error: 'Your account is pending admin approval.',
@@ -86,6 +92,12 @@ function createAuthMiddleware(supabase) {
       if (!profile || !req.user) {
         return res.status(401).json({
           error: 'Authentication required. Please provide a valid Bearer token.',
+        });
+      }
+
+      if (profile.role === 'recruiter') {
+        return res.status(403).json({
+          error: 'The Recruiter role has been retired. Please contact an administrator to reassign your account.',
         });
       }
 
@@ -106,8 +118,9 @@ function createAuthMiddleware(supabase) {
   }
 
   const requireAdmin = requireRole('admin');
-  const requireStaff = requireRole('admin', 'recruiter');
+  const requireStaff = requireRole('admin');
   const requireCorporate = requireRole('corporate', 'admin');
+  const requireAdminOrCorporate = requireRole('admin', 'corporate');
 
   return {
     requireAuth,
@@ -115,6 +128,7 @@ function createAuthMiddleware(supabase) {
     requireAdmin,
     requireStaff,
     requireCorporate,
+    requireAdminOrCorporate,
   };
 }
 

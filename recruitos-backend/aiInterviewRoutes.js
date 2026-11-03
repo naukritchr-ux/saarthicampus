@@ -11,7 +11,7 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 );
-const { requireStaff } = createAuthMiddleware(supabase);
+const { requireStaff, requireAdminOrCorporate } = createAuthMiddleware(supabase);
 
 const MODEL = 'llama-3.3-70b-versatile';
 const TOTAL_QUESTIONS = 5;
@@ -93,8 +93,8 @@ Required Qualification: ${job.qualification || 'N/A'}
 Key Skills: ${Array.isArray(job.skills) ? job.skills.join(', ') : job.skills || 'N/A'}`;
 }
 
-// Send or generate an AI interview link with a cryptographically secure token (staff only)
-router.post('/send-invite', requireStaff, async (req, res) => {
+// Send or generate an AI interview link with a cryptographically secure token (admin and corporate)
+router.post('/send-invite', requireAdminOrCorporate, async (req, res) => {
   try {
     const { candidate_id, job_id, sendEmail } = req.body;
     if (!candidate_id || !job_id) {
@@ -106,8 +106,14 @@ router.post('/send-invite', requireStaff, async (req, res) => {
     if (candErr || !candidate) throw candErr || new Error('Candidate not found');
 
     const { data: job, error: jobErr } = await supabase
-      .from('job_profiles').select('title, company').eq('id', job_id).single();
+      .from('job_profiles').select('title, company, company_id').eq('id', job_id).single();
     if (jobErr || !job) throw jobErr || new Error('Job not found');
+
+    if (req.userProfile?.role === 'corporate') {
+      if (!req.userProfile.company_id || job.company_id !== req.userProfile.company_id) {
+        return res.status(403).json({ error: "Access denied: cannot send interview invites for another company's job" });
+      }
+    }
 
     // Confirm candidate has an application for this job
     const { data: app, error: appErr } = await supabase

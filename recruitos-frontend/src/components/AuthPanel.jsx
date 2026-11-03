@@ -36,7 +36,7 @@ const trustItems = [
   },
 ];
 
-export default function AuthPanel({ role = "recruiter" }) {
+export default function AuthPanel({ role = "corporate" }) {
   const [mode, setMode] = useState("login");
   const [showPassword, setShowPassword] = useState(false);
 
@@ -55,7 +55,7 @@ export default function AuthPanel({ role = "recruiter" }) {
         ? "Corporate"
         : role === "admin"
           ? "Admin"
-          : "Recruiter";
+          : "User";
 
   async function handleLogin(event) {
     event.preventDefault();
@@ -88,6 +88,15 @@ export default function AuthPanel({ role = "recruiter" }) {
 
     const actualRole = profile?.role;
 
+    if (actualRole === "recruiter") {
+      await supabase.auth.signOut();
+      setLoginError(
+        "The Recruiter role has been retired. Please contact an administrator to reassign your account."
+      );
+      setLoggingIn(false);
+      return;
+    }
+
     if (actualRole && actualRole !== role) {
       await supabase.auth.signOut();
       setLoginError(
@@ -104,6 +113,12 @@ export default function AuthPanel({ role = "recruiter" }) {
     event.preventDefault();
     setRegError("");
     setRegStatus("loading");
+
+    if (role === "recruiter") {
+      setRegError("The Recruiter role has been retired and cannot be registered.");
+      setRegStatus("idle");
+      return;
+    }
 
     try {
       const response = await fetch(
@@ -410,27 +425,41 @@ export default function AuthPanel({ role = "recruiter" }) {
                 </button>
               </form>
 
-              <button
-                type="button"
-                onClick={() => setMode("register")}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "center",
-                  marginTop: 22,
-                  background: "none",
-                  border: "none",
-                  fontSize: 13.5,
-                  color: "#64748b",
-                  cursor: "pointer",
-                }}
-              >
-                New here? <span style={{ color: "#7C3AED", fontWeight: 700 }}>Create an account</span>
-              </button>
+              {role !== "admin" && (
+                <button
+                  type="button"
+                  onClick={() => setMode("register")}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "center",
+                    marginTop: 22,
+                    background: "none",
+                    border: "none",
+                    fontSize: 13.5,
+                    color: "#64748b",
+                    cursor: "pointer",
+                  }}
+                >
+                  New here? <span style={{ color: "#7C3AED", fontWeight: 700 }}>Create an account</span>
+                </button>
+              )}
+              {role === "admin" && (
+                <p
+                  style={{
+                    textAlign: "center",
+                    marginTop: 22,
+                    fontSize: 12.5,
+                    color: "#94a3b8",
+                  }}
+                >
+                  Admin accounts are provisioned by system administrators.
+                </p>
+              )}
             </>
           )}
 
-          {mode === "register" && (
+          {mode === "register" && role !== "admin" && (
             <>
               {regStatus === "done" ? (
                 <div style={{ textAlign: "center" }}>

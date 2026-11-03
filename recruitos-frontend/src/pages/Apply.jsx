@@ -246,7 +246,7 @@ export default function Apply() {
         <style>{`
           .student-apply-container {
             min-height: 100vh;
-            background: linear-gradient(135deg, #f8fafc 0%, #ede9fe 100%);
+            background: #F6F7FB;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -256,17 +256,17 @@ export default function Apply() {
           }
           .student-apply-card {
             background: #ffffff;
-            border-radius: 16px;
+            border-radius: 14px;
             padding: 36px 36px;
             width: 100%;
             max-width: 820px;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.1);
+            border: 1px solid #E7E8F0;
+            box-shadow: 0 1px 3px rgba(23, 23, 43, 0.05), 0 4px 12px rgba(23, 23, 43, 0.03);
             box-sizing: border-box;
           }
           .student-section {
             background: #ffffff;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #E7E8F0;
             border-radius: 12px;
             padding: 22px;
             margin-bottom: 20px;
@@ -277,14 +277,14 @@ export default function Apply() {
             gap: 12px;
             margin-bottom: 16px;
             padding-bottom: 12px;
-            border-bottom: 1px solid #f1f5f9;
+            border-bottom: 1px solid #F0F1F7;
           }
           .student-badge {
             width: 28px;
             height: 28px;
             border-radius: 50%;
-            background: #ede9fe;
-            color: #6d28d9;
+            background: #F0EAFF;
+            color: #6D3AE8;
             font-size: 13px;
             font-weight: 800;
             display: flex;
@@ -295,12 +295,12 @@ export default function Apply() {
           .student-section-title {
             font-size: 15px;
             font-weight: 700;
-            color: #0f172a;
+            color: #17172B;
             margin: 0;
           }
           .student-section-subtitle {
             font-size: 12px;
-            color: #64748b;
+            color: #62657A;
             margin: 2px 0 0;
           }
           .student-grid-2 {
@@ -311,30 +311,31 @@ export default function Apply() {
           .student-input {
             width: 100%;
             padding: 10px 13px;
-            border-radius: 8px;
-            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            border: 1px solid #E7E8F0;
             font-size: 13.5px;
             box-sizing: border-box;
-            background: #ffffff;
-            color: #0f172a;
+            background: #F8F8FC;
+            color: #17172B;
             outline: none;
             transition: border-color 0.15s, box-shadow 0.15s;
           }
           .student-input:focus {
-            border-color: #7c3aed;
-            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+            border-color: #6D3AE8;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 3px rgba(109, 58, 232, 0.12);
           }
           .student-label {
             display: block;
             font-size: 12.5px;
             font-weight: 700;
-            color: #334155;
+            color: #34354A;
             margin-bottom: 5px;
           }
           .student-label-sub {
             font-size: 11px;
             font-weight: 500;
-            color: #64748b;
+            color: #62657A;
           }
           @media (max-width: 640px) {
             .student-apply-card {
