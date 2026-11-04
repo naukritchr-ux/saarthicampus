@@ -98,18 +98,42 @@ export default function CollegeAutocomplete({ colleges, value, onChange, onCantF
           }}
         >
           {filtered.length === 0 ? (
-            <div style={{ padding: '16px 14px', fontSize: 13, color: '#AAA', textAlign: 'center' }}>
-              No colleges found for "{query}".
+            <div>
+              <div style={{ padding: '14px 14px 6px', fontSize: 13, color: '#888', textAlign: 'center' }}>
+                No colleges found for "{query}".
+              </div>
+              {onCantFind && (
+                <div
+                  onClick={() => { onCantFind(); setQuery(''); setOpen(false); }}
+                  style={{
+                    padding: '10px 12px',
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: '#6327BD',
+                    cursor: 'pointer',
+                    borderRadius: 8,
+                    textAlign: 'center',
+                    background: '#FAF5FF',
+                    margin: '6px 8px 8px',
+                    border: '1px solid #E9D5FF',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#F3E8FF'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = '#FAF5FF'; }}
+                >
+                  ➕ College not listed? Add New College
+                </div>
+              )}
             </div>
           ) : (
             filtered.map((c) => {
               const isSelected = c.id === value;
+              const locationStr = [c.city, c.state].filter(Boolean).join(', ');
               return (
                 <div
                   key={c.id}
                   onClick={() => handleSelect(c)}
                   style={{
-                    padding: '10px 12px',
+                    padding: '9px 12px',
                     fontSize: 13,
                     fontWeight: isSelected ? 600 : 400,
                     cursor: 'pointer',
@@ -118,14 +142,23 @@ export default function CollegeAutocomplete({ colleges, value, onChange, onCantF
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     background: isSelected ? '#F5F0FF' : 'transparent',
-                    color: isSelected ? '#8B5CF6' : '#333',
+                    color: isSelected ? '#6327BD' : '#333',
                     transition: 'background 0.1s',
                   }}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#FAFAFC'; }}
                   onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <span>{highlightMatch(c.name, query)}</span>
-                  {isSelected && <span>✓</span>}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
+                    <span style={{ color: '#1E293B', fontWeight: isSelected ? 700 : 500 }}>
+                      {highlightMatch(c.name, query)}
+                    </span>
+                    {locationStr && (
+                      <span style={{ fontSize: 11, color: '#64748B' }}>
+                        📍 {locationStr}
+                      </span>
+                    )}
+                  </div>
+                  {isSelected && <span style={{ color: '#6327BD', fontWeight: 800 }}>✓</span>}
                 </div>
               );
             })
@@ -136,14 +169,14 @@ export default function CollegeAutocomplete({ colleges, value, onChange, onCantF
             </div>
           )}
 
-          {onCantFind && (
+          {onCantFind && filtered.length > 0 && (
             <div
               onClick={() => { onCantFind(); setQuery(''); setOpen(false); }}
               style={{
                 padding: '10px 12px',
                 fontSize: 12.5,
                 fontWeight: 600,
-                color: '#8B5CF6',
+                color: '#6327BD',
                 cursor: 'pointer',
                 borderTop: '1px solid #F2F2F5',
                 marginTop: 4,
@@ -152,7 +185,7 @@ export default function CollegeAutocomplete({ colleges, value, onChange, onCantF
               onMouseEnter={(e) => { e.currentTarget.style.background = '#FAF7FF'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
-              Can't find your college? Enter it manually →
+              College not listed? Add New College →
             </div>
           )}
         </div>

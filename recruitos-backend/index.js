@@ -2449,7 +2449,7 @@ app.post("/api/candidates", async (req, res) => {
 
     const { data: existing, error: lookupErr } = await supabase
       .from("candidates")
-      .select("id")
+      .select("id, college_id")
       .eq("email", payload.email)
       .maybeSingle();
 
@@ -2459,6 +2459,10 @@ app.post("/api/candidates", async (req, res) => {
 
     let candidate;
     if (existing) {
+      // Preserve verified college_id if update does not specify a valid approved college_id
+      if (existing.college_id && !payload.college_id) {
+        payload.college_id = existing.college_id;
+      }
       const { data, error } = await supabase
         .from("candidates")
         .update(payload)
@@ -3179,6 +3183,162 @@ app.get("/api/colleges/public-search", async (req, res) => {
   }
 });
 
+// Rate limiting for public college registrations
+const studentCollegeRateLimit = new Map();
+function checkStudentCollegeRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 60 * 1000;
+  const limit = 20; // max 20 submissions per hour per IP
+  const record = studentCollegeRateLimit.get(ip) || [];
+  const recent = record.filter((t) => now - t < windowMs);
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  studentCollegeRateLimit.set(ip, recent);
+  return true;
+}
+
+// 0.1 Public endpoint for submitting a new college pending Admin approval (used by Student Apply Form)
+app.post("/api/colleges/submit-pending", async (req, res) => {
+  try {
+    const clientIp = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
+    if (!checkStudentCollegeRateLimit(clientIp)) {
+      return res.status(429).json({
+        error: "Too many college registration attempts from this network. Please try again after an hour.",
+      });
+    }
+
+    const {
+      college_name,
+      city,
+      state,
+      category,
+      website,
+      student_name,
+      student_email,
+      student_phone,
+    } = req.body || {};
+
+    if (!college_name || typeof college_name !== "string" || !college_name.trim()) {
+      return res.status(400).json({ error: "College Name is required" });
+    }
+    const cleanCollegeName = college_name.trim().replace(/\s+/g, " ");
+
+    if (!city || typeof city !== "string" || !city.trim()) {
+      return res.status(400).json({ error: "City is required" });
+    }
+    const cleanCity = city.trim().replace(/\s+/g, " ");
+
+    if (!state || typeof state !== "string" || !state.trim()) {
+      return res.status(400).json({ error: "State is required" });
+    }
+    const cleanState = state.trim().replace(/\s+/g, " ");
+
+    // 1. Check if college already exists in the approved colleges directory
+    // Handles name variations while requiring location alignment so distinct colleges in different cities are not merged
+    const { data: approvedMatches } = await supabase
+      .from("colleges")
+      .select("id, name, city, state, course, website")
+      .ilike("name", cleanCollegeName);
+
+    if (approvedMatches && approvedMatches.length > 0) {
+      const matchingApproved = approvedMatches.find((c) => {
+        const cCity = (c.city || "").trim().toLowerCase();
+        const subCity = cleanCity.toLowerCase();
+        const cState = (c.state || "").trim().toLowerCase();
+        const subState = cleanState.toLowerCase();
+
+        // If both records have city, they must match to prevent merging distinct colleges with identical generic names
+        if (cCity && subCity && cCity !== subCity) return false;
+        if (cState && subState && cState !== subState) return false;
+        return true;
+      });
+
+      if (matchingApproved) {
+        return res.json({
+          success: true,
+          is_existing: true,
+          college_id: matchingApproved.id,
+          college: matchingApproved,
+          message: "This college is already listed in the approved College Directory.",
+        });
+      }
+    }
+
+    // 2. Prevent duplicate pending submissions: Check if already pending in coordinator_registrations
+    const { data: pendingMatches } = await supabase
+      .from("coordinator_registrations")
+      .select("id, college_name, city, state, category, status, created_at")
+      .eq("status", "pending")
+      .ilike("college_name", cleanCollegeName);
+
+    if (pendingMatches && pendingMatches.length > 0) {
+      const matchingPending = pendingMatches.find((r) => {
+        const rCity = (r.city || "").trim().toLowerCase();
+        const subCity = cleanCity.toLowerCase();
+        const rState = (r.state || "").trim().toLowerCase();
+        const subState = cleanState.toLowerCase();
+
+        if (rCity && subCity && rCity !== subCity) return false;
+        if (rState && subState && rState !== subState) return false;
+        return true;
+      });
+
+      if (matchingPending) {
+        return res.json({
+          success: true,
+          is_duplicate: true,
+          is_pending: true,
+          registration_id: matchingPending.id,
+          college_name: matchingPending.college_name,
+          message: "This college has already been submitted and is currently pending admin review.",
+        });
+      }
+    }
+
+    // 3. Insert new pending record into coordinator_registrations
+    const cleanStudentEmail = student_email && typeof student_email === "string" ? student_email.trim().toLowerCase() : "applicant@saarthicampus.com";
+    const cleanStudentPhone = student_phone && typeof student_phone === "string" ? String(student_phone).replace(/\D/g, "") : "9999999999";
+
+    const payload = {
+      full_name: (student_name && typeof student_name === "string" && student_name.trim()) ? student_name.trim() : "Student Applicant",
+      designation: "Student Applicant",
+      college_name: cleanCollegeName,
+      official_email: cleanStudentEmail,
+      phone: cleanStudentPhone.length === 10 ? cleanStudentPhone : "9999999999",
+      city: cleanCity,
+      state: cleanState,
+      category: (category && typeof category === "string" && category.trim()) ? category.trim() : "Other",
+      website: website && typeof website === "string" && website.trim() ? website.trim() : null,
+      remarks: "Submitted via Student Job Application Form",
+      status: "pending",
+      matched_college_id: null,
+    };
+
+    const { data, error } = await supabase
+      .from("coordinator_registrations")
+      .insert([payload])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error inserting pending college:", error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(201).json({
+      success: true,
+      is_new: true,
+      is_pending: true,
+      registration_id: data.id,
+      college_name: cleanCollegeName,
+      message: "New college registered successfully and submitted for admin approval.",
+    });
+  } catch (err) {
+    console.error("submit-pending college error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // 1. Public Placement Coordinator Registration Endpoint
 app.post("/api/placement-coordinator/register", async (req, res) => {
   try {
@@ -3426,6 +3586,15 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
       );
 
       if (!rpcError && rpcResult && rpcResult.success) {
+        // Associate candidates who submitted under this pending college:
+        // Must match exact pending college_name and only update candidates where college_id IS NULL
+        // to prevent overwriting existing verified candidate college affiliations or using broad email matches
+        await supabase
+          .from("candidates")
+          .update({ college_id: rpcResult.college_id })
+          .is("college_id", null)
+          .ilike("college_other", reg.college_name.trim());
+
         return res.json({
           success: true,
           message: rpcResult.message,
@@ -3443,6 +3612,7 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
     }
 
     // 3. Backend fallback sequence
+    const isStudentApplicant = reg.designation === "Student" || reg.designation === "Student Applicant";
     let finalCollegeId = target_college_id || (!create_new ? reg.matched_college_id : null) || null;
     let isNewCollege = false;
 
@@ -3460,29 +3630,41 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
 
     // If still no matching college or create_new was requested:
     if (!finalCollegeId) {
-      const newCollegeRow = {
-        name: reg.college_name.trim(),
-        city: reg.city.trim(),
-        state: reg.state.trim(),
-        course: reg.category.trim(),
-        institution_type: reg.category.trim(),
-        courses_available: reg.courses_available || null,
-        website: reg.website || null,
-        tpo: reg.full_name.trim(),
-        status: "Interested",
-      };
-
-      const { data: createdCollege, error: createCollegeErr } = await supabase
+      // Check if college directory already has an institution with this exact name and city to prevent duplicate records
+      const { data: existingExact } = await supabase
         .from("colleges")
-        .insert([newCollegeRow])
-        .select()
-        .single();
+        .select("id")
+        .ilike("name", reg.college_name.trim())
+        .ilike("city", reg.city.trim())
+        .limit(1);
 
-      if (createCollegeErr) {
-        return res.status(500).json({ error: "Failed to create college record: " + createCollegeErr.message });
+      if (existingExact && existingExact.length > 0) {
+        finalCollegeId = existingExact[0].id;
+      } else {
+        const newCollegeRow = {
+          name: reg.college_name.trim(),
+          city: reg.city.trim(),
+          state: reg.state.trim(),
+          course: reg.category.trim(),
+          institution_type: reg.category.trim(),
+          courses_available: reg.courses_available || null,
+          website: reg.website || null,
+          tpo: isStudentApplicant ? null : (reg.full_name ? reg.full_name.trim() : null),
+          status: "Interested",
+        };
+
+        const { data: createdCollege, error: createCollegeErr } = await supabase
+          .from("colleges")
+          .insert([newCollegeRow])
+          .select()
+          .single();
+
+        if (createCollegeErr) {
+          return res.status(500).json({ error: "Failed to create college record: " + createCollegeErr.message });
+        }
+        finalCollegeId = createdCollege.id;
+        isNewCollege = true;
       }
-      finalCollegeId = createdCollege.id;
-      isNewCollege = true;
     } else {
       // Existing college: update missing metadata fields safely without overwriting
       const { data: existingCol } = await supabase
@@ -3522,50 +3704,52 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
     let coordId = existingCoords?.[0]?.id;
 
     if (!existingCoords || existingCoords.length === 0) {
-      const { data: newCoordRows, error: coordErr } = await supabase
-        .from("placement_coordinators")
-        .insert([
-          {
-            college_id: finalCollegeId,
-            name: reg.full_name.trim(),
-            phone: reg.phone,
-            email: reg.official_email,
-            is_current: true,
-            effective_from: new Date().toISOString().split("T")[0],
-            created_by: req.userProfile?.id || null,
-            created_by_name: req.userProfile?.name || "Admin",
-          },
-        ])
-        .select();
-
-      if (!coordErr && newCoordRows?.[0]) {
-        coordId = newCoordRows[0].id;
-      }
-
-      // Record audit history if table exists
-      try {
-        await supabase.from("placement_coordinator_history").insert([
-          {
-            college_id: finalCollegeId,
-            coordinator_id: coordId,
-            action: "CREATED",
-            previous_values: null,
-            new_values: {
+      if (!isStudentApplicant) {
+        const { data: newCoordRows, error: coordErr } = await supabase
+          .from("placement_coordinators")
+          .insert([
+            {
+              college_id: finalCollegeId,
               name: reg.full_name.trim(),
               phone: reg.phone,
               email: reg.official_email,
-              source: "coordinator_registration",
-              registration_id: reg.id,
+              is_current: true,
+              effective_from: new Date().toISOString().split("T")[0],
+              created_by: req.userProfile?.id || null,
+              created_by_name: req.userProfile?.name || "Admin",
             },
-            changed_at: new Date().toISOString(),
-            changed_by: req.userProfile?.id || null,
-            changed_by_name: req.userProfile?.name || "Admin",
-          },
-        ]);
-      } catch (histErr) {
-        console.warn("Audit history insert non-fatal:", histErr.message);
+          ])
+          .select();
+
+        if (!coordErr && newCoordRows?.[0]) {
+          coordId = newCoordRows[0].id;
+        }
+
+        // Record audit history if table exists
+        try {
+          await supabase.from("placement_coordinator_history").insert([
+            {
+              college_id: finalCollegeId,
+              coordinator_id: coordId,
+              action: "CREATED",
+              previous_values: null,
+              new_values: {
+                name: reg.full_name.trim(),
+                phone: reg.phone,
+                email: reg.official_email,
+                source: "coordinator_registration",
+                registration_id: reg.id,
+              },
+              changed_at: new Date().toISOString(),
+              changed_by: req.userProfile?.id || null,
+              changed_by_name: req.userProfile?.name || "Admin",
+            },
+          ]);
+        } catch (histErr) {
+          console.warn("Audit history insert non-fatal:", histErr.message);
+        }
       }
-    } else if (existingCoords[0] && !existingCoords[0].is_current) {
+    } else if (existingCoords[0] && !existingCoords[0].is_current && !isStudentApplicant) {
       // Reactivate if previously marked retired
       await supabase
         .from("placement_coordinators")
@@ -3611,6 +3795,15 @@ app.post("/api/placement-coordinators/registrations/:id/approve", requireStaff, 
     if (updateErr) {
       return res.status(500).json({ error: updateErr.message });
     }
+
+    // Link candidates who applied under this pending college:
+    // Scoped strictly to candidates with college_id IS NULL and matching college_other,
+    // avoiding broad email-only matches and never overwriting existing approved candidate records
+    await supabase
+      .from("candidates")
+      .update({ college_id: finalCollegeId })
+      .is("college_id", null)
+      .ilike("college_other", reg.college_name.trim());
 
     res.json({
       success: true,

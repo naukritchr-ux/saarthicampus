@@ -111,6 +111,36 @@ export async function rejectCoordinatorRegistration(id, { reason } = {}) {
   return data;
 }
 
+export async function submitPendingCollege({
+  college_name,
+  city,
+  state,
+  category,
+  website,
+  student_name,
+  student_email,
+  student_phone,
+}) {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/colleges/submit-pending`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      college_name,
+      city,
+      state,
+      category,
+      website,
+      student_name,
+      student_email,
+      student_phone,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to submit college for admin approval');
+  return data;
+}
+
 // ---------- Corporate Database ----------
 export async function getCompanies() {
   const { data, error } = await supabase.from('companies').select('*');

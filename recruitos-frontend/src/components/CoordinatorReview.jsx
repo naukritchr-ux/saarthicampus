@@ -426,8 +426,14 @@ export default function CoordinatorReview({ onPendingCountChange, onCollegeUpdat
                       {/* Coordinator */}
                       <td style={{ padding: "12px 16px" }}>
                         <div style={{ fontWeight: 700, color: "#0f172a" }}>{reg.full_name}</div>
-                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                          {reg.designation}
+                        <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                          {reg.designation === "Student Applicant" || reg.designation === "Student" ? (
+                            <span style={{ fontSize: 10.5, fontWeight: 700, background: "#e0f2fe", color: "#0369a1", padding: "1px 6px", borderRadius: 4 }}>
+                              🎓 Student Applicant
+                            </span>
+                          ) : (
+                            reg.designation
+                          )}
                         </div>
                       </td>
 

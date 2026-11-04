@@ -1,10 +1,31 @@
 import { useEffect, useState, useMemo } from 'react';
-import { getPublicJobs, getColleges, uploadResume, uploadPhoto, createCandidate, applyToJob, updateApplicationScore, computeMatchScore } from '../lib/api';
+import { getPublicJobs, getColleges, uploadResume, uploadPhoto, createCandidate, applyToJob, updateApplicationScore, computeMatchScore, submitPendingCollege } from '../lib/api';
 import { extractPdfText, scoreResume } from '../lib/resumeScoring';
 import CollegeAutocomplete from './CollegeAutocomplete';
 import SaarthiLogo from '../components/SaarthiLogo';
 import { sanitizePhone } from '../lib/phone';
 import { isValidEmail } from '../lib/email';
+
+const COLLEGE_CATEGORIES = [
+  "Engineering/Tech",
+  "MBA/Management",
+  "IT/Computer Applications",
+  "Law",
+  "Pharmacy",
+  "Commerce/Arts",
+  "Medical/Health Sciences",
+  "Polytechnic/Diploma",
+  "Other",
+];
+
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+  "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+  "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+  "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+  "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+  "Delhi NCR", "Chandigarh", "Other Union Territory"
+];
 
 function normalizeEmploymentType(raw) {
   if (!raw) return null;
@@ -35,6 +56,15 @@ export default function Apply() {
     skills: '', linkedin_url: '', github_url: '',
   });
   const [collegeMode, setCollegeMode] = useState('search');
+  const [selectedCollegeObj, setSelectedCollegeObj] = useState(null);
+  const [newCollege, setNewCollege] = useState({
+    name: '',
+    city: '',
+    state: '',
+    category: 'Engineering/Tech',
+    website: '',
+  });
+  const [pendingCollegeReg, setPendingCollegeReg] = useState(null);
   const [file, setFile] = useState(null);
   const [photo, setPhoto] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -156,11 +186,29 @@ export default function Apply() {
       return;
     }
     // 4. College / University
-    const hasCollege = (collegeMode === 'search' && Boolean(form.college_id)) || (form.college_other && form.college_other.trim().length > 0);
-    if (!hasCollege) {
-      setError('College / University is required. Please select from directory or enter college name.');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
+    if (collegeMode === 'new') {
+      if (!newCollege.name || !newCollege.name.trim() || newCollege.name.trim().length < 2) {
+        setError('College / University Name is required (minimum 2 characters).');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      if (!newCollege.city || !newCollege.city.trim()) {
+        setError("College City is required.");
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      if (!newCollege.state || !newCollege.state.trim()) {
+        setError("College State is required.");
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+    } else {
+      const hasCollege = Boolean(form.college_id) || Boolean(form.college_other && form.college_other.trim());
+      if (!hasCollege) {
+        setError('College / University is required. Please select from directory or add new college.');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
     }
     // 5. Degree
     if (!form.degree || !form.degree.trim()) {
@@ -271,6 +319,33 @@ export default function Apply() {
         setResumeExtractFailed(true);
       }
 
+      // If student is adding a new college, submit it for Admin approval
+      if (collegeMode === 'new') {
+        const trimmedNewName = newCollege.name ? newCollege.name.trim() : '';
+        setForm((prev) => ({ ...prev, college_id: '', college_other: trimmedNewName }));
+
+        try {
+          const pendingRes = await submitPendingCollege({
+            college_name: trimmedNewName,
+            city: newCollege.city.trim(),
+            state: newCollege.state.trim(),
+            category: newCollege.category,
+            website: newCollege.website ? newCollege.website.trim() : null,
+            student_name: form.name.trim(),
+            student_email: form.email.trim(),
+            student_phone: form.phone ? sanitizePhone(form.phone) : null,
+          });
+
+          if (pendingRes?.is_existing && pendingRes?.college_id) {
+            setForm((prev) => ({ ...prev, college_id: pendingRes.college_id, college_other: '' }));
+          } else if (pendingRes?.registration_id) {
+            setPendingCollegeReg(pendingRes);
+          }
+        } catch (pendingErr) {
+          console.warn("Non-fatal pending college submission:", pendingErr);
+        }
+      }
+
       setStep(2);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -289,12 +364,17 @@ export default function Apply() {
         const skillsArray = form.skills
           ? form.skills.split(',').map((s) => s.trim()).filter(Boolean)
           : [];
-        const candidate = await createCandidate({
+        const candidatePayload = {
           ...form,
+          college_id: collegeMode === 'new' ? (form.college_id || null) : (form.college_id || null),
+          college_other: collegeMode === 'new'
+            ? (newCollege.name ? newCollege.name.trim() : form.college_other)
+            : form.college_other,
           skills: skillsArray,
           resume_url: pendingResumeUrl,
           photo_url: pendingPhotoUrl,
-        });
+        };
+        const candidate = await createCandidate(candidatePayload);
         currentCandidateId = candidate.id;
         setCandidateId(currentCandidateId);
       }
@@ -680,46 +760,236 @@ export default function Apply() {
               {/* College Picker */}
               <div style={{ marginBottom: 14 }}>
                 <label className="student-label">
-                  College / University * <span className="student-label-sub">(Search campus directory or enter name)</span>
+                  College / University * <span className="student-label-sub">(Select from approved directory or add your institution)</span>
                 </label>
-                {collegeMode === 'search' ? (
-                  <CollegeAutocomplete
-                    colleges={colleges}
-                    value={form.college_id}
-                    onChange={(id) => setForm({ ...form, college_id: id, college_other: '' })}
-                    onCantFind={() => {
-                      setCollegeMode('manual');
-                      setForm({ ...form, college_id: '' });
+
+                {selectedCollegeObj ? (
+                  /* State A: Existing Approved College Selected */
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "12px 16px",
+                      background: "#f0fdf4",
+                      border: "1.5px solid #86efac",
+                      borderRadius: 10,
                     }}
-                  />
-                ) : (
-                  <div>
-                    <input
-                      className="student-input"
-                      value={form.college_other}
-                      onChange={(e) => setForm({ ...form, college_other: e.target.value })}
-                      placeholder="Type your college or university name"
-                      required
-                    />
+                  >
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        ✓ Selected Approved Institution
+                      </div>
+                      <div style={{ fontSize: 14.5, fontWeight: 700, color: "#0f172a", marginTop: 2 }}>
+                        {selectedCollegeObj.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
+                        📍 {[selectedCollegeObj.city, selectedCollegeObj.state].filter(Boolean).join(", ") || "Location on record"}
+                      </div>
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
-                        setCollegeMode('search');
-                        setForm({ ...form, college_other: '' });
+                        setSelectedCollegeObj(null);
+                        setForm({ ...form, college_id: "", college_other: "" });
+                        setCollegeMode("search");
                       }}
                       style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#7c3aed',
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 6,
+                        padding: "6px 12px",
                         fontSize: 12,
                         fontWeight: 600,
-                        cursor: 'pointer',
-                        padding: '6px 0 0',
-                        display: 'inline-block',
+                        color: "#475569",
+                        cursor: "pointer",
                       }}
                     >
-                      ← Back to search directory
+                      Change
                     </button>
+                  </div>
+                ) : collegeMode === "new" ? (
+                  /* State B: Adding New College (Pending Admin Approval) */
+                  <div
+                    style={{
+                      padding: "16px",
+                      background: "#f8fafc",
+                      border: "1.5px dashed #cbd5e1",
+                      borderRadius: 12,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#1e293b" }}>
+                          Add New Institution (Pending Admin Approval)
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                          Enter your college details. It will be submitted for verification, and your application will proceed immediately.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCollegeMode("search");
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#6327BD",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                        }}
+                      >
+                        ← Search Directory
+                      </button>
+                    </div>
+
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                        College / University Name *
+                      </label>
+                      <input
+                        type="text"
+                        className="student-input"
+                        value={newCollege.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewCollege({ ...newCollege, name: val });
+                          setForm({ ...form, college_other: val, college_id: "" });
+                        }}
+                        placeholder="e.g. Apex Institute of Management & Technology"
+                        required
+                        style={{ background: "#ffffff" }}
+                      />
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 12 }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                          City *
+                        </label>
+                        <input
+                          type="text"
+                          className="student-input"
+                          value={newCollege.city}
+                          onChange={(e) => setNewCollege({ ...newCollege, city: e.target.value })}
+                          placeholder="e.g. Mumbai, Pune, Lucknow"
+                          required
+                          style={{ background: "#ffffff" }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                          State *
+                        </label>
+                        <select
+                          className="student-input"
+                          value={newCollege.state}
+                          onChange={(e) => setNewCollege({ ...newCollege, state: e.target.value })}
+                          required
+                          style={{ background: "#ffffff" }}
+                        >
+                          <option value="">-- Select State --</option>
+                          {INDIAN_STATES.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                          Category / Stream
+                        </label>
+                        <select
+                          className="student-input"
+                          value={newCollege.category}
+                          onChange={(e) => setNewCollege({ ...newCollege, category: e.target.value })}
+                          style={{ background: "#ffffff" }}
+                        >
+                          {COLLEGE_CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                          Website <span style={{ fontWeight: 400, color: "#64748b" }}>(Optional)</span>
+                        </label>
+                        <input
+                          type="text"
+                          className="student-input"
+                          value={newCollege.website}
+                          onChange={(e) => setNewCollege({ ...newCollege, website: e.target.value })}
+                          placeholder="e.g. www.apexuniv.edu.in"
+                          style={{ background: "#ffffff" }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10, fontSize: 12, color: "#047857", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>ℹ️</span>
+                      <span>This college will be saved as <strong>Pending Admin Approval</strong>. You can proceed with your application immediately.</span>
+                    </div>
+                  </div>
+                ) : (
+                  /* State C: Search Directory */
+                  <div>
+                    <CollegeAutocomplete
+                      colleges={colleges}
+                      value={form.college_id}
+                      onChange={(id) => {
+                        const col = colleges.find((c) => c.id === id);
+                        setSelectedCollegeObj(col || null);
+                        setForm({ ...form, college_id: id, college_other: "" });
+                      }}
+                      onCantFind={() => {
+                        setCollegeMode("new");
+                        setSelectedCollegeObj(null);
+                        setForm({ ...form, college_id: "" });
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginTop: 6,
+                        fontSize: 12,
+                        color: "#64748b",
+                      }}
+                    >
+                      <span>Type at least 2 characters to search</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCollegeMode("new");
+                          setSelectedCollegeObj(null);
+                          setForm({ ...form, college_id: "" });
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#6327BD",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          fontSize: 12,
+                          padding: 0,
+                        }}
+                      >
+                        College not listed? Add New College
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
