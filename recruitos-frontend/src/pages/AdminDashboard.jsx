@@ -244,13 +244,32 @@ export default function AdminDashboard({ setActivePage, user }) {
 
   const companies = useMemo(() => {
     const set = new Set();
-    companiesList.forEach((c) => c.name && set.add(c.name.trim()));
-    jobProfiles.forEach((j) => j.company && set.add(j.company.trim()));
-    applications.forEach(
-      (a) => a.job_profiles?.company && set.add(a.job_profiles.company.trim())
-    );
+    const compIdToName = new Map();
+    companiesList.forEach((c) => {
+      if (c.name && typeof c.name === "string" && c.name.trim()) {
+        const clean = c.name.trim();
+        set.add(clean);
+        if (c.id) compIdToName.set(c.id, clean);
+      }
+    });
+
+    jobProfiles.forEach((j) => {
+      if (j.company_id && compIdToName.has(j.company_id)) {
+        return;
+      }
+      if (j.company && typeof j.company === "string" && j.company.trim()) {
+        const trimmed = j.company.trim();
+        const isKnown = Array.from(set).some(
+          (name) => name.toLowerCase() === trimmed.toLowerCase() || name.toLowerCase().includes(trimmed.toLowerCase())
+        );
+        if (!isKnown) {
+          set.add(trimmed);
+        }
+      }
+    });
+
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [companiesList, jobProfiles, applications]);
+  }, [companiesList, jobProfiles]);
 
   // Distinct Verified College Cities for the Location Filter
   const collegeCities = useMemo(() => {
