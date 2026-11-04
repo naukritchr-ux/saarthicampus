@@ -213,6 +213,136 @@ app.post("/api/colleges", requireStaff, async (req, res) => {
   res.json(data[0]);
 });
 
+app.get("/api/colleges/:id/dependencies", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ error: "Invalid college ID format. Must be a valid UUID." });
+    }
+
+    const { data: college, error: fetchErr } = await supabase
+      .from("colleges")
+      .select("id, name, city, state")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+    if (!college) return res.status(404).json({ error: "College not found" });
+
+    const [candRes, coordRes, regRes, driveRes] = await Promise.all([
+      supabase.from("candidates").select("id", { count: "exact", head: true }).eq("college_id", id),
+      supabase.from("placement_coordinators").select("id", { count: "exact", head: true }).eq("college_id", id),
+      supabase.from("coordinator_registrations").select("id", { count: "exact", head: true }).eq("matched_college_id", id),
+      supabase.from("drives").select("id", { count: "exact", head: true }).eq("college_id", id),
+    ]);
+
+    const studentCount = candRes.count || 0;
+    const coordinatorCount = coordRes.count || 0;
+    const registrationCount = regRes.count || 0;
+    const driveCount = driveRes.count || 0;
+    const canDelete = studentCount === 0 && coordinatorCount === 0 && registrationCount === 0 && driveCount === 0;
+
+    res.json({
+      college_id: id,
+      college_name: college.name,
+      canDelete,
+      counts: {
+        candidates: studentCount,
+        placement_coordinators: coordinatorCount,
+        coordinator_registrations: registrationCount,
+        drives: driveCount,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/colleges/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ error: "Invalid college ID format. Must be a valid UUID." });
+    }
+
+    // 1. Verify existence
+    const { data: college, error: fetchErr } = await supabase
+      .from("colleges")
+      .select("id, name, city, state")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) {
+      return res.status(500).json({ error: "Failed to query college: " + fetchErr.message });
+    }
+    if (!college) {
+      return res.status(404).json({ error: "College not found" });
+    }
+
+    // 2. Query all linked records safely before deletion
+    const [candRes, coordRes, regRes, driveRes] = await Promise.all([
+      supabase.from("candidates").select("id", { count: "exact", head: true }).eq("college_id", id),
+      supabase.from("placement_coordinators").select("id", { count: "exact", head: true }).eq("college_id", id),
+      supabase.from("coordinator_registrations").select("id", { count: "exact", head: true }).eq("matched_college_id", id),
+      supabase.from("drives").select("id", { count: "exact", head: true }).eq("college_id", id),
+    ]);
+
+    const studentCount = candRes.count || 0;
+    const coordinatorCount = coordRes.count || 0;
+    const registrationCount = regRes.count || 0;
+    const driveCount = driveRes.count || 0;
+
+    const blockingReasons = [];
+    if (studentCount > 0) blockingReasons.push(`${studentCount} student / candidate record(s)`);
+    if (coordinatorCount > 0) blockingReasons.push(`${coordinatorCount} placement coordinator(s)`);
+    if (registrationCount > 0) blockingReasons.push(`${registrationCount} coordinator registration(s)`);
+    if (driveCount > 0) blockingReasons.push(`${driveCount} campus drive(s)`);
+
+    // Strict safety check: Never cascade-delete student/application data or orphan related records
+    if (blockingReasons.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete "${college.name}" because it is currently linked to ${blockingReasons.join(", ")}. To protect student records and applications, this college cannot be deleted. Please reassign or unlink these records first.`,
+        blocked: true,
+        details: {
+          candidates: studentCount,
+          placement_coordinators: coordinatorCount,
+          coordinator_registrations: registrationCount,
+          drives: driveCount,
+        },
+      });
+    }
+
+    // 3. Clean up non-blocking audit history if present
+    try {
+      await supabase
+        .from("placement_coordinator_history")
+        .delete()
+        .eq("college_id", id);
+    } catch (auditErr) {
+      console.warn("Non-fatal audit history cleanup warning on college delete:", auditErr.message);
+    }
+
+    // 4. Safe delete of unlinked college record
+    const { error: delErr } = await supabase
+      .from("colleges")
+      .delete()
+      .eq("id", id);
+
+    if (delErr) {
+      return res.status(500).json({ error: "Failed to delete college: " + delErr.message });
+    }
+
+    return res.json({
+      success: true,
+      message: `College "${college.name}" has been permanently deleted from the directory.`,
+      deletedCollege: college,
+    });
+  } catch (err) {
+    console.error("Delete college error:", err);
+    return res.status(500).json({ error: err.message || "Internal server error deleting college" });
+  }
+});
+
 // ---- COMPANIES ----
 app.get("/api/companies", requireAuth, async (req, res) => {
   const profile = req.userProfile;

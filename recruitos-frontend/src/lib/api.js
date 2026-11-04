@@ -68,8 +68,30 @@ export async function updateCollege(id, { name, city, course, tpo, strength, sta
 }
 
 export async function deleteCollege(id) {
-  const { error } = await supabase.from('colleges').delete().eq('id', id);
-  if (error) throw error;
+  const headers = await authHeaders();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/colleges/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to delete college');
+  }
+  return data;
+}
+
+export async function getCollegeDependencies(id) {
+  const headers = await authHeaders();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const res = await fetch(`${backendUrl}/api/colleges/${encodeURIComponent(id)}/dependencies`, {
+    headers,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to check college dependencies');
+  }
+  return data;
 }
 
 // ---------- Placement Coordinator Registrations ----------

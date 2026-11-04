@@ -5,6 +5,7 @@ import { sanitizePhone } from "../lib/phone";
 import { isValidEmail } from "../lib/email";
 import AIImport from "../components/AIImport";
 import CoordinatorReview from "../components/CoordinatorReview";
+import { deleteCollege } from "../lib/api";
 
 const courses = [
   "All",
@@ -110,6 +111,11 @@ export default function CampusDB({ user }) {
   const [colleges, setColleges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Delete College state
+  const [deletingCollege, setDeletingCollege] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteNotice, setDeleteNotice] = useState(null);
 
   // Add/Edit college popup
   const [showForm, setShowForm] = useState(false);
@@ -660,19 +666,32 @@ export default function CampusDB({ user }) {
   // DELETE COLLEGE
   // --------------------------------------------------
 
-  async function handleDeleteCollege(id, name) {
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) {
-      return;
-    }
+  function handleDeleteCollegeClick(college) {
+    setDeleteNotice(null);
+    setDeletingCollege(college);
+  }
 
-    const { error } = await supabase.from("colleges").delete().eq("id", id);
+  async function confirmDeleteCollege() {
+    if (!deletingCollege) return;
+    setIsDeleting(true);
+    setDeleteNotice(null);
 
-    if (error) {
-      console.error("Failed to delete college:", error);
-
-      alert("Could not delete college. Check console for details.");
-    } else {
+    try {
+      const result = await deleteCollege(deletingCollege.id);
+      setDeleteNotice({
+        type: "success",
+        message: result.message || `College "${deletingCollege.name}" has been permanently deleted from the directory.`,
+      });
+      setDeletingCollege(null);
       await loadColleges();
+    } catch (err) {
+      console.error("Failed to delete college:", err);
+      setDeleteNotice({
+        type: "error",
+        message: err.message || "Failed to delete college. Please try again.",
+      });
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -1684,6 +1703,49 @@ export default function CampusDB({ user }) {
         </div>
       )}
 
+      {/* DELETE NOTIFICATION BANNER */}
+      {deleteNotice && (
+        <div
+          style={{
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginBottom: 16,
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            background: deleteNotice.type === "success" ? "#ecfdf5" : "#fef2f2",
+            border: `1px solid ${deleteNotice.type === "success" ? "#a7f3d0" : "#fecaca"}`,
+            color: deleteNotice.type === "success" ? "#065f46" : "#991b1b",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>{deleteNotice.type === "success" ? "✓" : "⚠️"}</span>
+            <div>
+              <strong>{deleteNotice.type === "success" ? "Success:" : "Deletion Blocked / Failed:"}</strong>{" "}
+              {deleteNotice.message}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDeleteNotice(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "inherit",
+              fontSize: 18,
+              cursor: "pointer",
+              padding: "0 6px",
+              lineHeight: 1,
+            }}
+            title="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* ERROR */}
 
       {error && (
@@ -2057,7 +2119,7 @@ export default function CampusDB({ user }) {
                           fontSize: 12,
                           color: "crimson",
                         }}
-                        onClick={() => handleDeleteCollege(c.id, c.name)}
+                        onClick={() => handleDeleteCollegeClick(c)}
                       >
                         Delete
                       </button>
@@ -2082,6 +2144,134 @@ export default function CampusDB({ user }) {
           </tbody>
         </table>
       </div>
+
+      {/* ==================================================
+          DELETE COLLEGE CONFIRMATION DIALOG
+         ================================================== */}
+      {deletingCollege && (
+        <div
+          onClick={() => !isDeleting && setDeletingCollege(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="panel"
+            style={{
+              maxWidth: 480,
+              width: "100%",
+              padding: 24,
+              borderRadius: 12,
+              background: "#ffffff",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "50%",
+                  background: "#fef2f2",
+                  color: "#dc2626",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 22,
+                }}
+              >
+                ⚠️
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1e293b" }}>
+                  Confirm College Deletion
+                </h3>
+                <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
+                  Permanent directory removal
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: 14, color: "#334155", lineHeight: 1.6, margin: "0 0 16px 0" }}>
+              Are you sure you want to permanently delete{" "}
+              <strong style={{ color: "#0f172a" }}>"{deletingCollege.name}"</strong>?
+            </p>
+
+            <div
+              style={{
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: 8,
+                padding: "10px 14px",
+                fontSize: 12,
+                color: "#475569",
+                lineHeight: 1.5,
+                marginBottom: 20,
+              }}
+            >
+              🔒 <strong>Integrity Protection:</strong> Colleges linked to student applications, placement coordinators, or campus drives cannot be deleted to prevent orphaned records.
+            </div>
+
+            {deleteNotice && deleteNotice.type === "error" && (
+              <div
+                style={{
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  color: "#991b1b",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  lineHeight: 1.4,
+                  marginBottom: 16,
+                }}
+              >
+                {deleteNotice.message}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={isDeleting}
+                onClick={() => setDeletingCollege(null)}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  cursor: isDeleting ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={isDeleting}
+                onClick={confirmDeleteCollege}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  background: "#dc2626",
+                  borderColor: "#dc2626",
+                  color: "#ffffff",
+                  cursor: isDeleting ? "not-allowed" : "pointer",
+                  opacity: isDeleting ? 0.7 : 1,
+                }}
+              >
+                {isDeleting ? "Deleting..." : "Delete College"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ==================================================
           ADD / EDIT COLLEGE POPUP
